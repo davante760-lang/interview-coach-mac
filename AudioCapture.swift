@@ -257,13 +257,14 @@ class AudioDelegate: NSObject, SCStreamOutput, SCStreamDelegate {
 
 @available(macOS 13.0, *)
 class MicCapture {
-    private let engine = AVAudioEngine()
+    private var engine = AVAudioEngine()
     private let deepgram: DeepgramWS
     private let railway: RailwayWS
     private var accum = Data()
     private let chunkBytes = 8192
     private var sent = 0
     private var running = false
+    private var deviceChangeObserver: NSObjectProtocol?
 
     init(railway: RailwayWS, deepgram: DeepgramWS) {
         self.railway = railway
@@ -292,7 +293,21 @@ class MicCapture {
         }
 
         deepgram.connect()
+        startEngine()
 
+        // Listen for default input device changes — auto-switch mic mid-call
+        deviceChangeObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: nil
+        ) { [weak self] _ in
+            guard let self = self, self.running else { return }
+            fputs("[Mic] Audio device changed — restarting engine\n", stderr)
+            self.restartEngine()
+        }
+    }
+
+    private func startEngine() {
         let inputNode = engine.inputNode
         let hwFormat = inputNode.outputFormat(forBus: 0)
         fputs("[Mic] Hardware format: \(hwFormat.sampleRate)Hz, \(hwFormat.channelCount)ch\n", stderr)
@@ -355,12 +370,44 @@ class MicCapture {
         }
     }
 
+    private func restartEngine() {
+        // Stop current engine, clear state, restart with new device
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        accum = Data()
+
+        // Small delay to let the OS finish the device switch
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self = self else { return }
+            // Need a fresh engine — AVAudioEngine can be stale after config change
+            self.engine = AVAudioEngine()
+            self.startEngine()
+            // Re-observe the new engine instance
+            if let old = self.deviceChangeObserver {
+                NotificationCenter.default.removeObserver(old)
+            }
+            self.deviceChangeObserver = NotificationCenter.default.addObserver(
+                forName: .AVAudioEngineConfigurationChange,
+                object: self.engine,
+                queue: nil
+            ) { [weak self] _ in
+                guard let self = self, self.running else { return }
+                fputs("[Mic] Audio device changed — restarting engine\n", stderr)
+                self.restartEngine()
+            }
+        }
+    }
+
     func stop() {
         if running {
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
             running = false
             fputs("[Mic] Engine stopped\n", stderr)
+        }
+        if let obs = deviceChangeObserver {
+            NotificationCenter.default.removeObserver(obs)
+            deviceChangeObserver = nil
         }
         deepgram.close()
     }
