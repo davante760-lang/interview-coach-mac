@@ -1,0 +1,56 @@
+{
+  "name": "interview-coach-desktop",
+  "version": "2.0.0",
+  "description": "Captures system audio via ScreenCaptureKit and streams to Interview Coach",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build-swift": "cd audio-capture && bash build.sh",
+    "build": "electron-builder --mac",
+    "release": "electron-builder --mac --publish always"
+  },
+  "author": "Interview Coach",
+  "dependencies": {
+    "electron-updater": "^6.8.3",
+    "node-mac-recorder": "^2.22.9",
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.interviewcoach.desktop",
+    "productName": "Interview Coach Audio",
+    "files": [
+      "main.js",
+      "renderer.js",
+      "index.html"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "identity": null,
+      "entitlements": "entitlements.mac.plist",
+      "entitlementsInherit": "entitlements.mac.plist",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Interview Coach captures system audio for real-time transcription.",
+        "NSScreenRecordingUsageDescription": "Interview Coach uses Screen Recording to capture system audio from your meetings."
+      }
+    },
+    "extraFiles": [
+      {
+        "from": "AudioCapture",
+        "to": "MacOS/AudioCapture"
+      }
+    ],
+    "publish": {
+      "provider": "github",
+      "owner": "davante760-lang",
+      "repo": "interview-coach-mac"
+    }
+  }
+}

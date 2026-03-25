@@ -1,0 +1,25 @@
+{
+  "name": "interview-coach",
+  "version": "1.0.0",
+  "description": "Live AI-powered interview coaching with real-time transcription",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@deepgram/sdk": "^3.9.0",
+    "pg": "^8.13.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1",
+    "pdf-parse": "^1.1.1",
+    "mammoth": "^1.8.0",
+    "ws": "^8.18.0",
+    "onnxruntime-node": "^1.20.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

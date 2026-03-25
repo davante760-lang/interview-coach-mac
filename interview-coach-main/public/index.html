@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Interview Coach</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- ═══ TOP BAR ═══ -->
+    <header id="topbar">
+      <div class="topbar-left">
+        <div class="logo">
+          <span class="logo-icon">◆</span>
+          <span class="logo-text">Interview Coach</span>
+        </div>
+        <nav class="nav-tabs">
+          <button class="nav-tab active" data-view="call" onclick="switchView('call')">Live Call</button>
+          <button class="nav-tab" data-view="deals" onclick="switchView('deals')">Positions</button>
+          <button class="nav-tab" data-view="warroom" onclick="switchView('warroom')">Prep Hub</button>
+          <button class="nav-tab" data-view="playbook" onclick="switchView('playbook')">Prep Docs</button>
+          <button class="nav-tab" data-view="calltypes" onclick="switchView('calltypes')">Interview Types</button>
+          <button class="nav-tab" data-view="keywords" onclick="switchView('keywords')">Keywords</button>
+          <button class="nav-tab" data-view="history" onclick="switchView('history')">History</button>
+          <button class="nav-tab" data-view="settings" onclick="switchView('settings')">Settings</button>
+        </nav>
+      </div>
+      <div class="topbar-right">
+        <div id="call-status" class="status-badge status-idle">
+          <span class="status-dot"></span>
+          <span class="status-text">Ready</span>
+        </div>
+        <div id="call-timer" class="timer hidden">00:00</div>
+      </div>
+    </header>
+
+    <!-- ═══ LIVE CALL VIEW ═══ -->
+    <main id="view-call" class="view active">
+      <!-- Pre-call setup bar -->
+      <div id="precall-bar">
+        <div class="precall-info">
+          <div class="input-group">
+            <label>Deal</label>
+            <select id="call-deal-select" style="background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius-sm);padding:5px 8px;font-family:var(--font);font-size:13px;color:var(--text-primary);width:160px">
+              <option value="">No deal</option>
+            </select>
+          </div>
+          <div class="input-group">
+            <label>Call Type</label>
+            <select id="call-type-select" style="background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius-sm);padding:5px 8px;font-family:var(--font);font-size:13px;color:var(--text-primary);width:145px">
+              <option value="behavioral">Behavioral</option>
+              <option value="technical">Technical</option>
+              <option value="case_study">Case Study</option>
+              <option value="panel">Panel</option>
+              <option value="executive">Executive</option>
+              <option value="phone_screen">Phone Screen</option>
+            </select>
+          </div>
+          <div class="input-group">
+            <label>Interviewer Name</label>
+            <input type="text" id="prospect-name" placeholder="e.g., Sarah Chen">
+          </div>
+          <div class="input-group">
+            <label>Company Interviewing At</label>
+            <input type="text" id="prospect-company" placeholder="e.g., Google">
+          </div>
+          <div class="input-group" style="flex:1">
+            <label>Meeting Link</label>
+            <input type="text" id="meeting-url" placeholder="Paste Zoom/Teams/Meet link..." style="width:100%">
+          </div>
+          <div class="input-group">
+            <label>My Resume</label>
+            <div class="file-upload-mini" id="resume-upload-zone">
+              <input type="file" id="resume-file" accept=".txt,.md,.pdf,.docx" onchange="uploadResume(this.files, false)">
+              <span id="resume-status">No resume loaded</span>
+              <button class="btn-sm" onclick="document.getElementById('resume-file').click()">Upload</button>
+            </div>
+          </div>
+          <div class="input-group">
+            <label>Position Intel</label>
+            <div class="file-upload-mini" id="position-upload-zone">
+              <input type="file" id="position-files" multiple accept=".txt,.md,.pdf,.docx" onchange="uploadProspectFiles(this.files)">
+              <span id="position-file-count">No files loaded</span>
+              <button class="btn-sm" onclick="document.getElementById('position-files').click()">+ Add</button>
+              <button class="btn-sm btn-clear" onclick="clearProspectIntel()">Clear</button>
+            </div>
+          </div>
+        </div>
+        <div class="precall-actions">
+          <button id="btn-bot" class="btn btn-start" onclick="startBotCall()">
+            <span class="btn-icon">◆</span> Send Bot
+          </button>
+          <button id="btn-end" class="btn btn-end hidden" onclick="endCall()">
+            <span class="btn-icon">■</span> End Call
+          </button>
+        </div>
+      </div>
+
+      <!-- Three-panel layout: Tabbed Left + Coaching Center + Scorecard Right -->
+      <div id="call-panels">
+        <!-- LEFT: Tabbed Panel -->
+        <div class="panel panel-tabbed">
+          <div class="panel-header">
+            <div class="panel-tabs">
+              <button class="panel-tab active" data-tab="discovery" onclick="switchPanelTab('discovery')">Discovery Intel</button>
+              <button class="panel-tab" data-tab="prospect" onclick="switchPanelTab('prospect')">Prospect</button>
+              <button class="panel-tab" data-tab="transcript" onclick="switchPanelTab('transcript')">Transcript</button>
+            </div>
+          </div>
+
+          <!-- Discovery Intel Tab -->
+          <div id="tab-discovery" class="tab-content active">
+            <div id="discovery-feed" class="panel-body">
+              <div class="empty-state">
+                <p>Interview data will populate here as the session progresses.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Prospect Tab -->
+          <div id="tab-prospect" class="tab-content">
+            <div id="prospect-feed" class="panel-body">
+              <div class="empty-state">
+                <p>Upload position intel before the call to see it here.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Transcript Tab -->
+          <div id="tab-transcript" class="tab-content">
+            <div id="transcript-feed" class="panel-body">
+              <div class="empty-state">
+                <p>Transcript will appear here when the call starts...</p>
+              </div>
+            </div>
+            <div class="panel-footer">
+              <span id="transcript-word-count" class="badge">0 words</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- CENTER: Coaching Feed (always visible) -->
+        <div class="panel panel-coaching">
+          <div class="panel-header">
+            <h3>Coaching</h3>
+            <div style="display:flex;align-items:center;gap:10px">
+              <div id="ai-thinking" class="ai-thinking-indicator" style="display:none">
+                <span class="ai-thinking-dot"></span>
+                <span class="ai-thinking-text">AI analyzing...</span>
+              </div>
+              <div class="tier-legend">
+                <span class="tier-dot tier-2"></span>Insight
+                <span class="tier-dot tier-3"></span>AI
+              </div>
+            </div>
+          </div>
+          <div id="coaching-feed" class="panel-body">
+            <div class="empty-state">
+              <p>Coaching prompts will appear here during the call...</p>
+            </div>
+          </div>
+          <div class="panel-footer">
+            <button class="btn-sm btn-ai" onclick="requestCoaching()" title="Manually trigger AI coaching">
+              ⚡ Ask AI
+            </button>
+          </div>
+        </div>
+
+        <!-- RIGHT: Tabbed Panel (Scorecard + Deal Brief) -->
+        <div class="panel panel-meddpicc">
+          <div class="right-panel-tabs">
+            <button class="rp-tab active" data-rp="meddpicc" onclick="switchRightTab('meddpicc')">Scorecard</button>
+            <button class="rp-tab" data-rp="brief" onclick="switchRightTab('brief')">Deal Brief</button>
+            <span id="scorecard-pct" class="badge" style="margin-left:auto">0%</span>
+          </div>
+
+          <!-- Scorecard Tab -->
+          <div id="rp-meddpicc" class="rp-content active">
+            <div id="scorecard" class="panel-body">
+              <div class="meddpicc-section" data-field="situation_context">
+                <div class="meddpicc-header">
+                  <span class="meddpicc-letter">S</span>
+                  <span class="meddpicc-name">Situation / Context</span>
+                  <span class="meddpicc-status" data-status="empty">—</span>
+                </div>
+                <div class="meddpicc-bullets" id="bullets-situation_context">
+                  <p class="meddpicc-empty">No data captured yet</p>
+                </div>
+              </div>
+              <div class="meddpicc-section" data-field="actions_taken">
+                <div class="meddpicc-header">
+                  <span class="meddpicc-letter">A</span>
+                  <span class="meddpicc-name">Actions Taken</span>
+                  <span class="meddpicc-status" data-status="empty">—</span>
+                </div>
+                <div class="meddpicc-bullets" id="bullets-actions_taken">
+                  <p class="meddpicc-empty">No data captured yet</p>
+                </div>
+              </div>
+              <div class="meddpicc-section" data-field="results_impact">
+                <div class="meddpicc-header">
+                  <span class="meddpicc-letter">R</span>
+                  <span class="meddpicc-name">Results / Impact</span>
+                  <span class="meddpicc-status" data-status="empty">—</span>
+                </div>
+                <div class="meddpicc-bullets" id="bullets-results_impact">
+                  <p class="meddpicc-empty">No data captured yet</p>
+                </div>
+              </div>
+              <div class="meddpicc-section" data-field="skills_demonstrated">
+                <div class="meddpicc-header">
+                  <span class="meddpicc-letter">S</span>
+                  <span class="meddpicc-name">Skills Demonstrated</span>
+                  <span class="meddpicc-status" data-status="empty">—</span>
+                </div>
+                <div class="meddpicc-bullets" id="bullets-skills_demonstrated">
+                  <p class="meddpicc-empty">No data captured yet</p>
+                </div>
+              </div>
+              <div class="meddpicc-section" data-field="company_knowledge">
+                <div class="meddpicc-header">
+                  <span class="meddpicc-letter">C</span>
+                  <span class="meddpicc-name">Company Knowledge</span>
+                  <span class="meddpicc-status" data-status="empty">—</span>
+                </div>
+                <div class="meddpicc-bullets" id="bullets-company_knowledge">
+                  <p class="meddpicc-empty">No data captured yet</p>
+                </div>
+              </div>
+              <div class="meddpicc-section" data-field="questions_asked">
+                <div class="meddpicc-header">
+                  <span class="meddpicc-letter">Q</span>
+                  <span class="meddpicc-name">Questions Asked</span>
+                  <span class="meddpicc-status" data-status="empty">—</span>
+                </div>
+                <div class="meddpicc-bullets" id="bullets-questions_asked">
+                  <p class="meddpicc-empty">No data captured yet</p>
+                </div>
+              </div>
+              <div class="meddpicc-section" data-field="red_flags">
+                <div class="meddpicc-header">
+                  <span class="meddpicc-letter">!</span>
+                  <span class="meddpicc-name">Red Flags</span>
+                  <span class="meddpicc-status" data-status="empty">—</span>
+                </div>
+                <div class="meddpicc-bullets" id="bullets-red_flags">
+                  <p class="meddpicc-empty">No data captured yet</p>
+                </div>
+              </div>
+            </div>
+            <div class="panel-footer">
+              <div id="scorecard-gaps" class="gaps-note">7 gaps remaining</div>
+            </div>
+          </div>
+
+          <!-- Deal Brief Tab -->
+          <div id="rp-brief" class="rp-content">
+            <div id="deal-brief-body" class="panel-body">
+              <p class="meddpicc-empty">Select a position before starting a call to see the AI briefing.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Deal Health Widget (Feature 5) -->
+      <div id="deal-health-widget" class="health-widget hidden" onclick="openWarRoom()">
+        <div id="health-widget-score" class="health-widget-circle">—</div>
+        <span class="health-widget-label">Health</span>
+      </div>
+
+      <!-- Quick note bar -->
+      <div id="note-bar" class="hidden">
+        <input type="text" id="quick-note" placeholder="Quick note..." onkeydown="if(event.key==='Enter')addNote()">
+        <button class="btn-sm" onclick="addNote()">Add Note</button>
+      </div>
+    </main>
+
+    <!-- ═══ DEALS VIEW ═══ -->
+    <main id="view-deals" class="view">
+      <div class="deals-container">
+        <div class="deals-header">
+          <div>
+            <h2>Position Pipeline</h2>
+            <div id="deals-stats" class="deals-stats-bar"></div>
+          </div>
+          <button class="btn btn-start" onclick="showCreateDealModal()">+ New Position</button>
+        </div>
+        <div class="deals-filters">
+          <input type="text" id="deals-search" placeholder="Search positions..." oninput="filterDeals(this.value)">
+          <select id="deals-stage-filter" onchange="filterDeals()">
+            <option value="">All Stages</option>
+            <option value="applied">Applied</option>
+            <option value="phone_screen">Phone Screen</option>
+            <option value="onsite">Onsite</option>
+            <option value="final_round">Final Round</option>
+            <option value="executive">Executive</option>
+            <option value="offer_accepted">Offer Accepted</option>
+            <option value="rejected">Rejected</option>
+          </select>
+        </div>
+        <div id="deals-list" class="deals-grid">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+
+      <!-- Create/Edit Deal Modal -->
+      <div id="deal-modal" class="modal hidden">
+        <div class="modal-content">
+          <button class="modal-close" onclick="closeDealModal()">✕</button>
+          <h2 id="deal-modal-title">New Position</h2>
+          <div class="deal-form">
+            <input type="hidden" id="deal-edit-id">
+            <div class="input-group" style="margin-bottom:12px">
+              <label>Company Name</label>
+              <input type="text" id="deal-company" placeholder="e.g., Google" style="width:100%">
+            </div>
+            <div style="display:flex;gap:12px;margin-bottom:12px">
+              <div class="input-group" style="flex:1">
+                <label>Target Comp ($)</label>
+                <input type="number" id="deal-value" placeholder="50000" style="width:100%">
+              </div>
+              <div class="input-group" style="flex:1">
+                <label>Team Size</label>
+                <input type="number" id="deal-vehicles" placeholder="500" style="width:100%">
+              </div>
+            </div>
+            <div class="input-group" style="margin-bottom:12px">
+              <label>Stage</label>
+              <select id="deal-stage" style="width:100%;background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;color:var(--text-primary);font-family:var(--font);font-size:13px">
+                <option value="applied">Applied</option>
+                <option value="phone_screen" selected>Phone Screen</option>
+                <option value="onsite">Onsite</option>
+                <option value="final_round">Final Round</option>
+                <option value="executive">Executive</option>
+                <option value="offer_accepted">Offer Accepted</option>
+                <option value="rejected">Rejected</option>
+              </select>
+            </div>
+            <div class="input-group" style="margin-bottom:16px">
+              <label>Notes</label>
+              <textarea id="deal-notes" placeholder="Position notes..." style="width:100%;height:80px;background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;color:var(--text-primary);font-family:var(--font);font-size:13px;resize:vertical"></textarea>
+            </div>
+            <button class="btn btn-start" onclick="saveDeal()" style="width:100%">Save Position</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Deal Detail / Prep Hub Modal -->
+      <div id="deal-detail-modal" class="modal hidden">
+        <div class="modal-content modal-large">
+          <button class="modal-close" onclick="closeDealDetail()">✕</button>
+          <div id="deal-detail-body"></div>
+        </div>
+      </div>
+    </main>
+
+    <!-- ═══ WAR ROOM VIEW ═══ -->
+    <main id="view-warroom" class="view">
+      <div class="playbook-container">
+        <div class="playbook-header">
+          <h2>Prep Hub</h2>
+          <p>Enter your interview details. Hit Generate to auto-create all prep docs and quick answers.</p>
+        </div>
+
+        <!-- Generator Form -->
+        <div id="prep-gen-form" class="prep-gen-form">
+          <div class="prep-gen-row">
+            <div class="prep-gen-field">
+              <label>Company Name *</label>
+              <input type="text" id="gen-company" placeholder="e.g., CrowdStrike">
+            </div>
+            <div class="prep-gen-field">
+              <label>Industry</label>
+              <input type="text" id="gen-industry" placeholder="e.g., Cybersecurity">
+            </div>
+            <div class="prep-gen-field">
+              <label>Role Title *</label>
+              <input type="text" id="gen-role" placeholder="e.g., Enterprise Account Executive">
+            </div>
+          </div>
+          <div class="prep-gen-row">
+            <div class="prep-gen-field">
+              <label>Territory Type</label>
+              <select id="gen-territory">
+                <option value="Enterprise">Enterprise</option>
+                <option value="Strategic">Strategic</option>
+                <option value="Named">Named</option>
+                <option value="Mid-Market">Mid-Market</option>
+                <option value="Vertical">Vertical</option>
+              </select>
+            </div>
+            <div class="prep-gen-field">
+              <label>Interview Stage</label>
+              <select id="gen-stage">
+                <option value="Initial recruiter screen">Recruiter Screen</option>
+                <option value="Hiring manager first round">Hiring Manager</option>
+                <option value="Panel">Panel</option>
+                <option value="Final">Final Round</option>
+              </select>
+            </div>
+            <div class="prep-gen-field">
+              <label>Interviewer(s)</label>
+              <input type="text" id="gen-interviewers" placeholder="e.g., Sarah Chen (VP Sales)">
+            </div>
+          </div>
+          <div class="prep-gen-row">
+            <div class="prep-gen-field" style="flex:1">
+              <label>Job Description (paste full JD)</label>
+              <textarea id="gen-jd" rows="6" placeholder="Paste the full job description here..."></textarea>
+            </div>
+          </div>
+          <div class="prep-gen-row" style="justify-content:flex-end;gap:12px">
+            <div id="gen-status" style="font-size:12px;color:var(--text-muted);align-self:center"></div>
+            <button class="btn btn-start" onclick="generatePrepDocs()" id="gen-btn" style="font-size:14px;padding:10px 28px">
+              ⚡ Generate Prep Docs
+            </button>
+          </div>
+        </div>
+
+        <!-- Generated Results (shown after generation) -->
+        <div id="prep-gen-results" class="prep-gen-results hidden">
+          <div class="prep-gen-results-header">
+            <h3>Generated Prep Docs</h3>
+            <div style="display:flex;gap:8px">
+              <button class="btn-sm" onclick="approveAllSections()">✓ Approve All</button>
+              <button class="btn-sm" onclick="document.getElementById('prep-gen-results').classList.add('hidden')">Collapse</button>
+            </div>
+          </div>
+          <div id="prep-gen-sections"></div>
+        </div>
+      </div>
+    </main>
+
+    <!-- ═══ CALL TYPE SETTINGS VIEW ═══ -->
+    <main id="view-calltypes" class="view">
+      <div class="playbook-container">
+        <div class="playbook-header">
+          <h2>Interview Type Playbooks</h2>
+          <p>Upload assets and example transcripts for each interview type. The AI loads these during sessions to give type-specific coaching.</p>
+        </div>
+        <div id="calltype-sections">
+          <!-- Generated by JS -->
+        </div>
+      </div>
+    </main>
+
+    <!-- ═══ KEYWORDS VIEW ═══ -->
+    <main id="view-keywords" class="view">
+      <div class="playbook-container">
+        <div class="playbook-header">
+          <div style="display:flex;justify-content:space-between;align-items:start">
+            <div>
+              <h2>Keyword Manager</h2>
+              <p>Manage coaching triggers. Keywords fire instantly when the interviewer says them during a session.</p>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn-sm" onclick="showAddKeywordModal()" style="background:var(--accent);color:white">+ Add Keyword</button>
+              <button class="btn-sm" onclick="showExtractModal()">🤖 Extract from Transcript</button>
+            </div>
+          </div>
+          <div id="kw-stats" style="margin-top:8px"></div>
+        </div>
+        <div class="kw-filters" style="display:flex;gap:10px;margin-bottom:12px">
+          <input type="text" id="kw-search" placeholder="Search keywords..." oninput="filterKeywords()" style="flex:1;background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px;font-family:var(--font);font-size:13px;color:var(--text-primary)">
+          <select id="kw-filter-source" onchange="filterKeywords()" style="background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius);padding:8px;font-family:var(--font);font-size:13px;color:var(--text-primary)">
+            <option value="">All Sources</option>
+            <option value="built-in">Built-in</option>
+            <option value="manual">Manual</option>
+            <option value="ai-transcript">AI Extracted</option>
+            <option value="playbook-mined">Playbook Mined</option>
+          </select>
+          <select id="kw-filter-category" onchange="filterKeywords()" style="background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius);padding:8px;font-family:var(--font);font-size:13px;color:var(--text-primary)">
+            <option value="">All Categories</option>
+            <option value="interview">Interview</option>
+            <option value="alert">Alert</option>
+            <option value="star">STAR</option>
+            <option value="custom">Custom</option>
+          </select>
+        </div>
+        <div id="kw-list"></div>
+      </div>
+
+      <!-- Add/Edit Keyword Modal -->
+      <div id="kw-modal" class="modal hidden">
+        <div class="modal-content">
+          <button class="modal-close" onclick="closeKwModal()">✕</button>
+          <h2 id="kw-modal-title">Add Keyword</h2>
+          <input type="hidden" id="kw-edit-id">
+          <div class="input-group" style="margin-bottom:10px">
+            <label style="display:block;margin-bottom:4px">Trigger Phrase</label>
+            <input type="text" id="kw-trigger" placeholder="e.g., too expensive" style="width:100%;background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;color:var(--text-primary);font-family:var(--font);font-size:13px">
+          </div>
+          <div class="input-group" style="margin-bottom:10px">
+            <label style="display:block;margin-bottom:4px">Coaching Prompt</label>
+            <textarea id="kw-prompt" placeholder="What should the candidate do when they hear this?" style="width:100%;height:60px;background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;color:var(--text-primary);font-family:var(--font);font-size:13px;resize:vertical"></textarea>
+          </div>
+          <div class="input-group" style="margin-bottom:10px">
+            <label style="display:block;margin-bottom:4px">Context (why this trigger matters)</label>
+            <textarea id="kw-context" placeholder="Explain why this moment matters for coaching..." style="width:100%;height:50px;background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;color:var(--text-primary);font-family:var(--font);font-size:13px;resize:vertical"></textarea>
+          </div>
+          <div style="display:flex;gap:10px;margin-bottom:10px">
+            <div class="input-group" style="flex:1">
+              <label style="display:block;margin-bottom:4px">Category</label>
+              <select id="kw-category" style="width:100%;background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;color:var(--text-primary);font-family:var(--font);font-size:13px">
+                <option value="interview">Interview</option>
+                <option value="alert">Alert</option>
+                <option value="star">STAR</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+            <div class="input-group" style="flex:1">
+              <label style="display:block;margin-bottom:4px">Scorecard Field</label>
+              <select id="kw-field" style="width:100%;background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;color:var(--text-primary);font-family:var(--font);font-size:13px">
+                <option value="">None</option>
+                <option value="situation_context">Situation / Context</option>
+                <option value="actions_taken">Actions Taken</option>
+                <option value="results_impact">Results / Impact</option>
+                <option value="skills_demonstrated">Skills Demonstrated</option>
+                <option value="company_knowledge">Company Knowledge</option>
+                <option value="questions_asked">Questions Asked</option>
+                <option value="red_flags">Red Flags</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;margin-bottom:14px">
+            <div class="input-group" style="flex:1">
+              <label style="display:block;margin-bottom:4px">Cooldown (seconds)</label>
+              <input type="number" id="kw-cooldown" value="30" style="width:100%;background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;color:var(--text-primary);font-family:var(--font);font-size:13px">
+            </div>
+            <div class="input-group" style="flex:1">
+              <label style="display:block;margin-bottom:4px">Call Type (optional)</label>
+              <select id="kw-calltype" style="width:100%;background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;color:var(--text-primary);font-family:var(--font);font-size:13px">
+                <option value="">All call types</option>
+                <option value="phone_screen">Phone Screen</option>
+                <option value="technical">Technical</option>
+                <option value="case_study">Case Study</option>
+                <option value="panel">Panel</option>
+                <option value="executive">Executive</option>
+              </select>
+            </div>
+          </div>
+          <button class="btn btn-start" onclick="saveKeyword()" style="width:100%">Save Keyword</button>
+        </div>
+      </div>
+
+      <!-- Extract from Transcript Modal -->
+      <div id="extract-modal" class="modal hidden">
+        <div class="modal-content modal-large">
+          <button class="modal-close" onclick="closeExtractModal()">✕</button>
+          <h2>Extract Keywords from Transcript</h2>
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Paste a call transcript below. AI will analyze it and extract coaching-relevant trigger phrases with context.</p>
+          <div class="input-group" style="margin-bottom:10px">
+            <label style="display:block;margin-bottom:4px">Call Type</label>
+            <select id="extract-calltype" style="width:200px;background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;color:var(--text-primary);font-family:var(--font);font-size:13px">
+              <option value="phone_screen">Phone Screen</option>
+              <option value="technical">Technical</option>
+              <option value="case_study">Case Study</option>
+              <option value="panel">Panel</option>
+              <option value="executive">Executive</option>
+            </select>
+          </div>
+          <textarea id="extract-transcript" placeholder="Paste your call transcript here..." style="width:100%;height:200px;background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius);padding:10px;color:var(--text-primary);font-family:var(--font);font-size:13px;resize:vertical;margin-bottom:12px"></textarea>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-start" onclick="extractKeywords(false)">Preview Extracted</button>
+            <button class="btn-sm" onclick="extractKeywords(true)" style="background:var(--green);color:white">Extract & Add All</button>
+          </div>
+          <div id="extract-results" style="margin-top:12px"></div>
+        </div>
+      </div>
+    </main>
+
+    <!-- ═══ PLAYBOOK VIEW ═══ -->
+    <main id="view-playbook" class="view">
+      <div class="playbook-container">
+        <div class="playbook-header">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div>
+              <h2>Your Prep Docs</h2>
+              <p>Build your prep library section by section. The more you upload, the smarter your coaching becomes.</p>
+            </div>
+            <button class="btn-sm" onclick="clearAllPrepDocs()" style="white-space:nowrap;background:var(--bg-active);color:var(--red);border:1px solid rgba(233,69,96,0.3);padding:6px 14px;font-size:11px">🗑 New Interview</button>
+          </div>
+          <div id="playbook-overall-meter" class="overall-meter"></div>
+        </div>
+
+        <!-- Resume Upload Card -->
+        <div class="resume-card" id="resume-card">
+          <div class="resume-drop-zone" id="resume-drop-zone" onclick="document.getElementById('resume-file-prep').click()">
+            <input type="file" id="resume-file-prep" accept=".txt,.md,.pdf,.docx" onchange="uploadResume(this.files, true)" style="display:none">
+            <div class="resume-drop-icon" id="resume-drop-icon">📄</div>
+            <div class="resume-drop-text" id="resume-drop-text">
+              <div class="resume-drop-title">Drop your resume here</div>
+              <div class="resume-drop-hint">or click to browse — PDF, DOCX, TXT, MD</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Past Interview Transcripts -->
+        <div class="resume-card" id="transcripts-card">
+          <div class="resume-drop-zone" id="transcripts-drop-zone" onclick="document.getElementById('transcripts-file-input').click()" style="border-color:rgba(139,92,246,0.35)">
+            <input type="file" id="transcripts-file-input" multiple accept=".txt,.md,.pdf,.docx" onchange="uploadTranscripts(this.files)" style="display:none">
+            <div class="resume-drop-icon" id="transcripts-drop-icon">🎙️</div>
+            <div class="resume-drop-text" id="transcripts-drop-text">
+              <div class="resume-drop-title">Drop past interview transcripts here</div>
+              <div class="resume-drop-hint">Upload your real interviews so the AI learns how you naturally speak — multiple files OK</div>
+            </div>
+          </div>
+          <div id="transcripts-file-list" style="display:none;padding:12px 16px;border-top:1px solid var(--border)"></div>
+          <div id="style-profile" class="style-profile" style="display:none">
+            <div class="style-profile-header">
+              <span style="color:var(--purple)">✦</span> Your Interview Style Profile
+              <button class="btn-sm" onclick="regenerateStyleProfile()" style="margin-left:auto;font-size:11px">↻ Regenerate</button>
+            </div>
+            <div id="style-profile-body" class="style-profile-body"></div>
+          </div>
+        </div>
+
+        <!-- Quick Answers — Pre-loaded Q&A pairs for instant matching -->
+        <div class="qa-section" id="qa-section">
+          <div class="qa-header">
+            <div>
+              <div class="qa-title">⚡ Quick Answers</div>
+              <div class="qa-subtitle">Drop a Q&A doc (use "Q:" to mark questions). Answers fire instantly when the AI hears a match.</div>
+            </div>
+            <div class="qa-header-actions">
+              <span id="qa-count" class="qa-count">0 pairs loaded</span>
+              <button class="btn-sm" onclick="showAddQAModal()">+ Manual</button>
+            </div>
+          </div>
+          <div class="resume-drop-zone" id="qa-drop-zone" onclick="document.getElementById('qa-file-input').click()" style="border-color:rgba(249,115,22,0.35);margin:12px;border-radius:6px;padding:16px 20px">
+            <input type="file" id="qa-file-input" accept=".txt,.md,.pdf,.docx" onchange="uploadQAFile(this.files)" style="display:none">
+            <div class="resume-drop-icon" id="qa-drop-icon">⚡</div>
+            <div class="resume-drop-text" id="qa-drop-text">
+              <div class="resume-drop-title">Drop your Q&A prep doc here</div>
+              <div class="resume-drop-hint">Format questions with "Q:" — DOCX, PDF, TXT, MD</div>
+            </div>
+          </div>
+          <div id="qa-list" class="qa-list"></div>
+        </div>
+
+        <!-- Add Q&A Modal (manual single pair) -->
+        <div id="qa-modal" class="qa-modal hidden">
+          <div class="qa-modal-content">
+            <div class="qa-modal-title">Add Quick Answer</div>
+            <div style="margin-bottom:12px">
+              <label style="font-size:11px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:4px">Question</label>
+              <input type="text" id="qa-question-input" placeholder='e.g., "Tell me about yourself"' style="width:100%;padding:8px 12px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-family:var(--font);font-size:13px">
+            </div>
+            <div style="margin-bottom:16px">
+              <label style="font-size:11px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:4px">Your Answer</label>
+              <textarea id="qa-answer-input" rows="5" placeholder="Type the exact answer..." style="width:100%;padding:8px 12px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-family:var(--font);font-size:13px;resize:vertical"></textarea>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end">
+              <button class="btn-sm" onclick="closeQAModal()">Cancel</button>
+              <button class="btn btn-start" onclick="saveQAPair()" style="font-size:13px;padding:6px 16px">Save</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="playbook-sections">
+          <!-- Generated by JS -->
+        </div>
+      </div>
+    </main>
+
+    <!-- ═══ HISTORY VIEW ═══ -->
+    <main id="view-history" class="view">
+      <div class="history-container">
+        <div class="history-header">
+          <h2>Session History</h2>
+          <div class="history-search">
+            <input type="text" id="history-search" placeholder="Search by interviewer or company..." oninput="searchCalls(this.value)">
+          </div>
+        </div>
+        <div id="history-stats" class="history-stats"></div>
+        <div id="call-list" class="call-list">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+    </main>
+
+    <!-- ═══ SETTINGS VIEW ═══ -->
+    <main id="view-settings" class="view">
+      <div class="playbook-container">
+        <div class="playbook-header">
+          <h2>Settings</h2>
+          <p>Manage calendar integrations and app configuration.</p>
+        </div>
+
+        <!-- Calendar Integrations -->
+        <div class="wr-card" style="margin-bottom:16px">
+          <div class="wr-card-title" style="margin-bottom:12px">Calendar Integrations</div>
+          <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">Connect your calendar to auto-send the bot to meetings. The bot joins 2 minutes before each meeting with a video link.</p>
+
+          <div style="display:flex;gap:12px;margin-bottom:16px">
+            <button class="btn" onclick="connectGoogleCalendar()" style="background:#4285F4;color:white;border:none;padding:10px 20px;border-radius:var(--radius);font-family:var(--font);font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px">
+              <span style="font-size:18px">G</span> Connect Google Calendar
+            </button>
+            <button class="btn" onclick="connectOutlookCalendar()" style="background:#0078D4;color:white;border:none;padding:10px 20px;border-radius:var(--radius);font-family:var(--font);font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px">
+              <span style="font-size:16px">⊞</span> Connect Outlook Calendar
+            </button>
+          </div>
+
+          <div id="calendar-connections">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+
+        <!-- Auto-join settings -->
+        <div class="wr-card">
+          <div class="wr-card-title" style="margin-bottom:12px">Auto-Join Settings</div>
+          <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">Configure which meetings the bot automatically joins.</p>
+          <div id="calendar-settings-detail" style="font-size:13px;color:var(--text-muted)">Connect a calendar to configure settings.</div>
+        </div>
+
+        <!-- Upcoming Events -->
+        <div class="wr-card" style="margin-top:16px">
+          <div class="wr-card-title" style="margin-bottom:12px">Upcoming Meetings</div>
+          <div id="upcoming-events" style="font-size:13px;color:var(--text-muted)">No upcoming meetings detected.</div>
+        </div>
+      </div>
+    </main>
+
+      <!-- Call detail modal -->
+      <div id="call-detail-modal" class="modal hidden">
+        <div class="modal-content">
+          <button class="modal-close" onclick="closeCallDetail()">✕</button>
+          <div id="call-detail-body"></div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Post-call summary modal -->
+    <div id="summary-modal" class="modal hidden">
+      <div class="modal-content modal-large">
+        <button class="modal-close" onclick="closeSummary()">✕</button>
+        <div id="summary-body"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

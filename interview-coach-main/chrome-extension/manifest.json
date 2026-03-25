@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Interview Coach — Audio Capture",
+  "version": "1.0.0",
+  "description": "Captures interviewer audio from meeting tabs for real-time transcription.",
+  "permissions": [
+    "tabCapture",
+    "offscreen",
+    "storage",
+    "activeTab"
+  ],
+  "action": {
+    "default_title": "Click to start/stop capturing this tab's audio",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}
