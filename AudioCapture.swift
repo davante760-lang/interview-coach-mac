@@ -407,23 +407,36 @@ func run(_ serverURL: String, _ dgKey: String, _ name: String, _ company: String
 
     // Start system audio capture via ScreenCaptureKit
     let d = AudioDelegate(railway: railway, deepgram: dgSystem)
-    let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
-    guard let display = content.displays.first else { exit(1) }
+    var stream: SCStream? = nil
+    do {
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+        guard let display = content.displays.first else {
+            fputs("[SC] No display found — system audio unavailable, mic still running\n", stderr)
+            print("READY"); fflush(stdout)
+            while let line = readLine(strippingNewline: true), line != "STOP" {}
+            railway.sendText("{\"type\":\"end_call\"}")
+            micCapture.stop()
+            railway.close()
+            return
+        }
 
-    let cfg = SCStreamConfiguration()
-    cfg.capturesAudio = true
-    cfg.excludesCurrentProcessAudio = false
-    cfg.sampleRate = 48000
-    cfg.channelCount = 1  // mono — no channel mixing bugs
-    cfg.width = 2; cfg.height = 2
-    cfg.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+        let cfg = SCStreamConfiguration()
+        cfg.capturesAudio = true
+        cfg.excludesCurrentProcessAudio = false
+        cfg.sampleRate = 48000
+        cfg.channelCount = 1  // mono — no channel mixing bugs
+        cfg.width = 2; cfg.height = 2
+        cfg.minimumFrameInterval = CMTime(value: 1, timescale: 1)
 
-    let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
-    let stream = SCStream(filter: filter, configuration: cfg, delegate: d)
-    try stream.addStreamOutput(d, type: .audio, sampleHandlerQueue: DispatchQueue(label: "audio", qos: .userInteractive))
-    try stream.addStreamOutput(d, type: .screen, sampleHandlerQueue: DispatchQueue(label: "video", qos: .background))
-    try await stream.startCapture()
-    fputs("[SC] capture started\n", stderr)
+        let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
+        stream = SCStream(filter: filter, configuration: cfg, delegate: d)
+        try stream!.addStreamOutput(d, type: .audio, sampleHandlerQueue: DispatchQueue(label: "audio", qos: .userInteractive))
+        try stream!.addStreamOutput(d, type: .screen, sampleHandlerQueue: DispatchQueue(label: "video", qos: .background))
+        try await stream!.startCapture()
+        fputs("[SC] capture started\n", stderr)
+    } catch {
+        fputs("[SC] Screen capture failed: \(error) — mic capture still running\n", stderr)
+    }
     print("READY"); fflush(stdout)
 
     while let line = readLine(strippingNewline: true), line != "STOP" {}
@@ -431,7 +444,7 @@ func run(_ serverURL: String, _ dgKey: String, _ name: String, _ company: String
     dgSystem.close()
     micCapture.stop()
     try await Task.sleep(nanoseconds: 300_000_000)
-    try await stream.stopCapture()
+    if let s = stream { try? await s.stopCapture() }
     railway.close()
 }
 
