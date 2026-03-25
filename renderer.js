@@ -9,6 +9,13 @@ let isCapturing = false;
 let startTime   = null;
 let timerHandle = null;
 
+// Show app version
+try {
+  const pkg = require('./package.json');
+  const el = document.getElementById('app-version');
+  if (el) el.textContent = 'v' + pkg.version;
+} catch (e) {}
+
 // ── Listen for events from main process ───────────────────────────────────────
 
 ipcRenderer.on('audio-log', (event, line) => {
