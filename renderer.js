@@ -56,6 +56,12 @@ ipcRenderer.on('meeting-auto-start', async () => {
   if (!isCapturing) await startCapture();
 });
 
+// Web app End Session button stopped capture
+ipcRenderer.on('web-stop-capture', async () => {
+  console.log('[Renderer] Web UI stopped capture');
+  if (isCapturing) await stopCapture();
+});
+
 // Web app Start Session button triggered capture via local HTTP server
 ipcRenderer.on('web-start-capture', async (event, { prospectName, prospectCompany }) => {
   console.log('[Renderer] Web UI triggered capture');

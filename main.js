@@ -439,6 +439,7 @@ function startLocalServer() {
 
     if (req.method === 'POST' && req.url === '/stop') {
       stopAudioProcess();
+      mainWindow?.webContents.send('web-stop-capture');
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
       return;
