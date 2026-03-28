@@ -1,10 +1,127 @@
-const { app, BrowserWindow, systemPreferences, ipcMain, Menu } = require('electron');
+const { app, BrowserWindow, systemPreferences, ipcMain, Menu, Notification } = require('electron');
 const { autoUpdater } = require('electron-updater');
-const { spawn } = require('child_process');
+const { spawn, exec } = require('child_process');
 const path = require('path');
+const fs   = require('fs');
 
 let mainWindow;
 let audioProcess = null;
+
+// ── Settings (persisted to userData/settings.json) ──────────────────────────
+
+const SETTINGS_PATH = path.join(app.getPath('userData'), 'settings.json');
+
+function loadSettings() {
+  try { return JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8')); }
+  catch { return { autoStart: false }; }
+}
+
+function saveSettings(s) {
+  try { fs.writeFileSync(SETTINGS_PATH, JSON.stringify(s)); } catch {}
+}
+
+// ── Meeting Detection ────────────────────────────────────────────────────────
+// Uses macOS's avconferenced daemon (runs ONLY when camera is active — any
+// app or browser tab using the camera) + known audio-only app processes.
+
+let _meetingDetectInterval = null;
+let _meetingActive         = false;
+let _meetingStartedCapture = false;  // true if we auto-started because of a meeting
+let _meetingEndGraceTimer  = null;
+let _dismissedUntil        = 0;      // epoch ms — cooldown after dismiss
+
+const VIDEO_CALL_PROCS = [
+  'avconferenced',      // macOS camera daemon — fires for ANY video call (browser or native)
+  'VDCAssistant',       // older macOS camera daemon (pre-Monterey)
+  'zoom.us',
+  'CptHost',            // Zoom in-call process
+  'Microsoft Teams',
+  'webex',
+  'Webex Meetings',
+  'Slack',              // Slack huddles
+  'Discord',
+  'FaceTime',
+];
+
+function detectVideoMeeting() {
+  return new Promise((resolve) => {
+    // pgrep with -f flag searches full command line; exit 0 = found
+    const checks = VIDEO_CALL_PROCS.map(p => `pgrep -f "${p}" > /dev/null 2>&1`).join(' || ');
+    exec(checks, (err) => resolve(err === null || err.code === 0));
+  });
+}
+
+function startMeetingDetection() {
+  if (_meetingDetectInterval) return;
+  _meetingDetectInterval = setInterval(async () => {
+    const inMeeting = await detectVideoMeeting();
+    const settings  = loadSettings();
+    const now       = Date.now();
+
+    if (inMeeting && !_meetingActive) {
+      // Meeting just started
+      _meetingActive = true;
+      console.log('[Meeting] Video meeting detected');
+
+      if (now < _dismissedUntil) {
+        console.log('[Meeting] Suppressed — cooldown active');
+        return;
+      }
+
+      if (settings.autoStart && !audioProcess) {
+        // Auto-start: tell renderer to kick off capture
+        console.log('[Meeting] Auto-starting capture');
+        _meetingStartedCapture = true;
+        mainWindow?.webContents.send('meeting-auto-start');
+        _showMeetingNotification(true);
+      } else if (!audioProcess) {
+        // Manual: prompt user
+        console.log('[Meeting] Prompting user to start capture');
+        mainWindow?.webContents.send('meeting-detected');
+        _showMeetingNotification(false);
+      }
+
+    } else if (!inMeeting && _meetingActive) {
+      // Meeting seems to have ended — wait grace period before acting
+      if (!_meetingEndGraceTimer) {
+        console.log('[Meeting] Meeting may have ended — starting 10s grace period');
+        _meetingEndGraceTimer = setTimeout(() => {
+          _meetingEndGraceTimer = null;
+          detectVideoMeeting().then((stillActive) => {
+            if (!stillActive) {
+              _meetingActive = false;
+              console.log('[Meeting] Meeting ended');
+              if (_meetingStartedCapture && audioProcess) {
+                _meetingStartedCapture = false;
+                mainWindow?.webContents.send('meeting-ended');
+              }
+            }
+          });
+        }, 10000);
+      }
+    } else if (inMeeting && _meetingEndGraceTimer) {
+      // Camera came back during grace period — cancel end timer
+      clearTimeout(_meetingEndGraceTimer);
+      _meetingEndGraceTimer = null;
+    }
+  }, 5000);
+}
+
+function _showMeetingNotification(autoStarted) {
+  if (!Notification.isSupported()) return;
+  const n = new Notification({
+    title: 'Interview Coach',
+    body: autoStarted
+      ? 'Meeting detected — recording started automatically.'
+      : 'Meeting detected — open Interview Coach to start recording.',
+    silent: false,
+  });
+  n.on('click', () => {
+    mainWindow?.show();
+    mainWindow?.focus();
+  });
+  n.show();
+}
 
 // Binary is inside the Electron app bundle — inherits Screen Recording permission
 const BINARY_PATH = path.join(path.dirname(process.execPath), 'AudioCapture');
@@ -113,6 +230,7 @@ app.whenReady().then(async () => {
   }
   buildMenu();
   createWindow();
+  startMeetingDetection();
 
   // Silent background update check on launch (non-blocking)
   setTimeout(() => {
@@ -174,8 +292,21 @@ ipcMain.handle('start-capture', async (event, { serverUrl, prospectName, prospec
 
 ipcMain.handle('stop-capture', async () => { stopAudioProcess(); return { ok: true }; });
 ipcMain.handle('check-binary', async () => {
-  const fs = require('fs');
   return { exists: fs.existsSync(BINARY_PATH), path: BINARY_PATH };
+});
+
+// Settings IPC
+ipcMain.handle('get-settings', async () => loadSettings());
+ipcMain.handle('save-settings', async (event, settings) => {
+  saveSettings(settings);
+  return { ok: true };
+});
+
+// Dismiss meeting prompt — suppress for 45 min (rest of typical interview)
+ipcMain.handle('dismiss-meeting-prompt', async () => {
+  _dismissedUntil = Date.now() + 45 * 60 * 1000;
+  _meetingStartedCapture = false;
+  return { ok: true };
 });
 
 function stopAudioProcess() {

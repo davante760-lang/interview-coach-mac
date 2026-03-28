@@ -16,6 +16,93 @@ try {
   if (el) el.textContent = 'v' + pkg.version;
 } catch (e) {}
 
+// ── Settings ─────────────────────────────────────────────────────────────────
+
+async function loadSettings() {
+  return await ipcRenderer.invoke('get-settings');
+}
+
+async function saveSettings(s) {
+  await ipcRenderer.invoke('save-settings', s);
+}
+
+// Load settings and apply to UI on startup
+window.addEventListener('DOMContentLoaded', async () => {
+  const s = await loadSettings();
+  const toggle = document.getElementById('auto-start-toggle');
+  if (toggle) toggle.checked = !!s.autoStart;
+});
+
+async function onAutoStartToggle() {
+  const toggle = document.getElementById('auto-start-toggle');
+  const val = toggle ? toggle.checked : false;
+  await saveSettings({ autoStart: val });
+  showSettingsSaved();
+}
+
+function showSettingsSaved() {
+  const el = document.getElementById('settings-saved');
+  if (!el) return;
+  el.style.opacity = '1';
+  setTimeout(() => { el.style.opacity = '0'; }, 1200);
+}
+
+// ── Meeting Detection Events from Main Process ────────────────────────────────
+
+// Main detected meeting + auto-start is ON → start immediately
+ipcRenderer.on('meeting-auto-start', async () => {
+  console.log('[Renderer] Auto-starting capture from meeting detection');
+  showMeetingBanner('auto');
+  if (!isCapturing) await startCapture();
+});
+
+// Main detected meeting + auto-start is OFF → show prompt
+ipcRenderer.on('meeting-detected', () => {
+  console.log('[Renderer] Meeting detected — showing prompt');
+  showMeetingBanner('prompt');
+});
+
+// Meeting ended — stop if we're capturing
+ipcRenderer.on('meeting-ended', async () => {
+  console.log('[Renderer] Meeting ended');
+  hideMeetingBanner();
+  if (isCapturing) {
+    await stopCapture();
+    updateUI('idle');
+  }
+});
+
+function showMeetingBanner(mode) {
+  const banner = document.getElementById('meeting-banner');
+  const msg    = document.getElementById('meeting-banner-msg');
+  const actions = document.getElementById('meeting-banner-actions');
+  if (!banner) return;
+
+  if (mode === 'auto') {
+    msg.textContent = 'Meeting detected — recording started';
+    if (actions) actions.style.display = 'none';
+  } else {
+    msg.textContent = 'Meeting detected';
+    if (actions) actions.style.display = 'flex';
+  }
+  banner.style.display = 'flex';
+}
+
+function hideMeetingBanner() {
+  const banner = document.getElementById('meeting-banner');
+  if (banner) banner.style.display = 'none';
+}
+
+async function onMeetingStartClick() {
+  hideMeetingBanner();
+  if (!isCapturing) await startCapture();
+}
+
+async function onMeetingDismissClick() {
+  hideMeetingBanner();
+  await ipcRenderer.invoke('dismiss-meeting-prompt');
+}
+
 // ── Listen for events from main process ───────────────────────────────────────
 
 ipcRenderer.on('audio-log', (event, line) => {

@@ -147,6 +147,76 @@ input.field::placeholder { color: #475569; }
   line-height: 1.6;
   flex-shrink: 0;
 }
+
+/* Meeting detection banner */
+.meeting-banner {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 10px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.meeting-banner-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #6366f1;
+  flex-shrink: 0;
+  animation: pulse 1.5s infinite;
+}
+.meeting-banner-msg { flex: 1; color: #a5b4fc; font-weight: 500; }
+.meeting-banner-actions { display: flex; gap: 6px; flex-shrink: 0; -webkit-app-region: no-drag; }
+.meeting-btn-start {
+  background: #6366f1; color: white; border: none; border-radius: 6px;
+  padding: 4px 10px; font-size: 11px; font-weight: 600; cursor: pointer;
+  font-family: inherit;
+}
+.meeting-btn-start:hover { background: #818cf8; }
+.meeting-btn-dismiss {
+  background: transparent; color: #64748b; border: 1px solid #334155;
+  border-radius: 6px; padding: 4px 8px; font-size: 11px; cursor: pointer;
+  font-family: inherit;
+}
+.meeting-btn-dismiss:hover { color: #94a3b8; }
+
+/* Settings row */
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: #1e293b;
+  border-radius: 10px;
+  font-size: 12px;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+.settings-label { color: #94a3b8; }
+.settings-hint  { font-size: 10px; color: #475569; margin-top: 1px; }
+.settings-saved { font-size: 10px; color: #6366f1; opacity: 0; transition: opacity 0.3s; margin-left: 8px; }
+
+/* Toggle switch */
+.toggle-wrap { display: flex; align-items: center; gap: 8px; }
+.toggle {
+  position: relative; width: 36px; height: 20px;
+  -webkit-app-region: no-drag;
+}
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+  position: absolute; inset: 0;
+  background: #334155; border-radius: 20px;
+  cursor: pointer; transition: background .2s;
+}
+.toggle-slider::before {
+  content: ''; position: absolute;
+  width: 14px; height: 14px; border-radius: 50%;
+  left: 3px; top: 3px;
+  background: white; transition: transform .2s;
+}
+.toggle input:checked + .toggle-slider { background: #6366f1; }
+.toggle input:checked + .toggle-slider::before { transform: translateX(16px); }
 </style>
 </head>
 <body>
@@ -173,6 +243,16 @@ input.field::placeholder { color: #475569; }
     <input class="field" id="prospect-company" type="text" placeholder="Company (optional)">
   </div>
 
+  <!-- Meeting detection banner — shown automatically when meeting detected -->
+  <div class="meeting-banner" id="meeting-banner">
+    <div class="meeting-banner-dot"></div>
+    <span id="meeting-banner-msg" class="meeting-banner-msg">Meeting detected</span>
+    <div class="meeting-banner-actions" id="meeting-banner-actions">
+      <button class="meeting-btn-start" onclick="onMeetingStartClick()">Start Recording</button>
+      <button class="meeting-btn-dismiss" onclick="onMeetingDismissClick()">Dismiss</button>
+    </div>
+  </div>
+
   <button class="btn btn-start" id="btn-start" onclick="startCapture()">
     🎙 Start Capturing Audio
   </button>
@@ -197,6 +277,21 @@ input.field::placeholder { color: #475569; }
   <div class="error-msg" id="error-msg" style="display:none"></div>
 
   <div id="update-status" style="display:none;font-size:10px;color:#10b981;text-align:center;padding:4px;"></div>
+
+  <!-- Auto-start setting -->
+  <div class="settings-row">
+    <div>
+      <div class="settings-label">Auto-start when meeting detected</div>
+      <div class="settings-hint">Recording begins automatically when a video call is detected</div>
+    </div>
+    <div class="toggle-wrap">
+      <span class="settings-saved" id="settings-saved">Saved</span>
+      <label class="toggle">
+        <input type="checkbox" id="auto-start-toggle" onchange="onAutoStartToggle()">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+  </div>
 
   <div class="info">
     System audio (interviewer) + Mic (you).<br>
