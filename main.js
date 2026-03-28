@@ -59,9 +59,8 @@ function detectVideoMeeting() {
     // Only check dedicated in-call processes — these ONLY exist during an active call.
     // Broad checks (lsof CoreAudio, VDCAssistant) cause false positives and are excluded.
     const inCallProcs = [
-      'CptHost',          // Zoom conference host — only spawns during an active call
-      'ZoomAudioService', // Zoom audio — only during calls
-      'webexmeetingapp',  // Webex in-meeting binary
+      'CptHost',         // Zoom conference host — only spawns during an active Zoom call
+      'webexmeetingapp', // Webex in-meeting binary — only during active Webex calls
     ];
     const fullCheck = inCallProcs.map(p => `pgrep -f "${p}" > /dev/null 2>&1`).join(' || ');
 
