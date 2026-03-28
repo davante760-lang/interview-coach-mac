@@ -1,10 +1,11 @@
-const { app, BrowserWindow, systemPreferences, ipcMain, Menu, Notification } = require('electron');
+const { app, BrowserWindow, systemPreferences, ipcMain, Menu, Tray, nativeImage, Notification } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { spawn, exec } = require('child_process');
 const path = require('path');
 const fs   = require('fs');
 
 let mainWindow;
+let tray = null;
 let audioProcess = null;
 
 // ── Settings (persisted to userData/settings.json) ──────────────────────────
@@ -239,6 +240,45 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+// ── Tray ─────────────────────────────────────────────────────────────────────
+
+function createTray() {
+  const iconPath = path.join(__dirname, 'trayTemplate.png');
+  const icon = nativeImage.createFromPath(iconPath);
+  tray = new Tray(icon);
+  tray.setToolTip('Interview Coach');
+  tray.on('click', () => {
+    if (mainWindow.isVisible()) {
+      mainWindow.hide();
+    } else {
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+  updateTrayMenu();
+}
+
+function updateTrayMenu(isRecording = false) {
+  if (!tray) return;
+  const menu = Menu.buildFromTemplate([
+    {
+      label: isRecording ? '● Recording…' : 'Ready',
+      enabled: false
+    },
+    { type: 'separator' },
+    {
+      label: 'Show Window',
+      click: () => { mainWindow.show(); mainWindow.focus(); }
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit',
+      click: () => { app.isQuitting = true; app.quit(); }
+    }
+  ]);
+  tray.setContextMenu(menu);
+}
+
 // ── Window ──────────────────────────────────────────────────────────────────
 
 function createWindow() {
@@ -248,6 +288,13 @@ function createWindow() {
     webPreferences: { nodeIntegration: true, contextIsolation: false }
   });
   mainWindow.loadFile('index.html');
+  // Hide to tray instead of quitting when window is closed
+  mainWindow.on('close', (e) => {
+    if (!app.isQuitting) {
+      e.preventDefault();
+      mainWindow.hide();
+    }
+  });
 }
 
 app.whenReady().then(async () => {
@@ -259,6 +306,7 @@ app.whenReady().then(async () => {
   }
   buildMenu();
   createWindow();
+  createTray();
   startMeetingDetection();
 
   // Silent background update check on launch (non-blocking)
@@ -269,7 +317,8 @@ app.whenReady().then(async () => {
   }, 5000);
 });
 
-app.on('window-all-closed', () => { stopAudioProcess(); app.quit(); });
+app.on('window-all-closed', () => { /* stay alive in tray */ });
+app.on('before-quit', () => { app.isQuitting = true; stopAudioProcess(); });
 
 ipcMain.handle('start-capture', async (event, { serverUrl, prospectName, prospectCompany }) => {
   if (audioProcess) return { error: 'Already running' };
@@ -295,6 +344,7 @@ ipcMain.handle('start-capture', async (event, { serverUrl, prospectName, prospec
   audioProcess.on('exit', (code, signal) => {
     console.log('[Main] Swift exited:', code, signal);
     audioProcess = null;
+    updateTrayMenu(false);
     mainWindow?.webContents.send('audio-stopped', { code, signal });
   });
 
@@ -304,6 +354,7 @@ ipcMain.handle('start-capture', async (event, { serverUrl, prospectName, prospec
     mainWindow?.webContents.send('audio-stopped', { code: -1 });
   });
 
+  updateTrayMenu(true);
   return await new Promise((resolve) => {
     let done = false;
     const finish = (r) => { if (!done) { done = true; resolve(r); } };
