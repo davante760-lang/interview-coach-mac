@@ -155,13 +155,24 @@ ipcRenderer.on('audio-log', (event, line) => {
   }
 });
 
-ipcRenderer.on('update-status', (event, msg) => {
-  const el = document.getElementById('update-status');
-  if (el) {
-    el.textContent = msg;
-    el.style.display = 'block';
+ipcRenderer.on('update-downloaded', (event, version) => {
+  // Only show the banner when not actively recording — don't interrupt interviews
+  if (!isCapturing) {
+    const banner = document.getElementById('update-banner');
+    const text = document.getElementById('update-banner-text');
+    if (banner && text) {
+      text.textContent = `v${version} ready to install`;
+      banner.style.display = 'flex';
+    }
+  } else {
+    // Store so we can show banner when recording stops
+    window._pendingUpdateVersion = version;
   }
 });
+
+function restartToUpdate() {
+  ipcRenderer.invoke('quit-and-install');
+}
 
 ipcRenderer.on('audio-stopped', (event, { code, signal }) => {
   console.log('[Renderer] Swift stopped:', code, signal);
@@ -219,6 +230,16 @@ async function stopCapture() {
   stopTimer();
   await ipcRenderer.invoke('stop-capture');
   updateUI('idle');
+  // Show deferred update banner now that we're no longer recording
+  if (window._pendingUpdateVersion) {
+    const banner = document.getElementById('update-banner');
+    const text = document.getElementById('update-banner-text');
+    if (banner && text) {
+      text.textContent = `v${window._pendingUpdateVersion} ready to install`;
+      banner.style.display = 'flex';
+    }
+    window._pendingUpdateVersion = null;
+  }
 }
 
 // ── Timer ─────────────────────────────────────────────────────────────────────

@@ -186,10 +186,8 @@ autoUpdater.on('download-progress', (progress) => {
 autoUpdater.on('update-downloaded', (info) => {
   console.log('[Updater] Update downloaded:', info.version);
   if (mainWindow) {
-    mainWindow.webContents.send('update-status', 'Update v' + info.version + ' ready — restarting now...');
+    mainWindow.webContents.send('update-downloaded', info.version);
   }
-  // Install immediately — quit and relaunch
-  setTimeout(() => autoUpdater.quitAndInstall(false, true), 2000);
 });
 
 autoUpdater.on('error', (err) => {
@@ -322,6 +320,7 @@ ipcMain.handle('start-capture', async (event, { serverUrl, prospectName, prospec
 });
 
 ipcMain.handle('stop-capture', async () => { stopAudioProcess(); return { ok: true }; });
+ipcMain.handle('quit-and-install', () => { autoUpdater.quitAndInstall(false, true); });
 ipcMain.handle('check-binary', async () => {
   return { exists: fs.existsSync(BINARY_PATH), path: BINARY_PATH };
 });
