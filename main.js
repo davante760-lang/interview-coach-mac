@@ -186,9 +186,10 @@ autoUpdater.on('download-progress', (progress) => {
 autoUpdater.on('update-downloaded', (info) => {
   console.log('[Updater] Update downloaded:', info.version);
   if (mainWindow) {
-    mainWindow.webContents.send('update-status', 'Update v' + info.version + ' ready — will install on restart');
+    mainWindow.webContents.send('update-status', 'Update v' + info.version + ' ready — restarting now...');
   }
-  // Auto-install on quit (already set via autoInstallOnAppQuit)
+  // Install immediately — quit and relaunch
+  setTimeout(() => autoUpdater.quitAndInstall(false, true), 2000);
 });
 
 autoUpdater.on('error', (err) => {
