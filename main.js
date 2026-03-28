@@ -401,12 +401,15 @@ function startLocalServer() {
       req.on('data', c => body += c);
       req.on('end', () => {
         const data = JSON.parse(body || '{}');
-        startAudioCapture(data.prospectName, data.prospectCompany).then(result => {
-          mainWindow?.show();
-          mainWindow?.focus();
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(result));
+        // Route through renderer so it updates its UI state (same path as meeting auto-start)
+        mainWindow?.show();
+        mainWindow?.focus();
+        mainWindow?.webContents.send('web-start-capture', {
+          prospectName: data.prospectName || '',
+          prospectCompany: data.prospectCompany || ''
         });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
       });
       return;
     }

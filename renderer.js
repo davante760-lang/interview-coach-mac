@@ -56,6 +56,20 @@ ipcRenderer.on('meeting-auto-start', async () => {
   if (!isCapturing) await startCapture();
 });
 
+// Web app Start Session button triggered capture via local HTTP server
+ipcRenderer.on('web-start-capture', async (event, { prospectName, prospectCompany }) => {
+  console.log('[Renderer] Web UI triggered capture');
+  if (prospectName) {
+    const el = document.getElementById('prospect-name');
+    if (el) el.value = prospectName;
+  }
+  if (prospectCompany) {
+    const el = document.getElementById('prospect-company');
+    if (el) el.value = prospectCompany;
+  }
+  if (!isCapturing) await startCapture();
+});
+
 // Main detected meeting + auto-start is OFF → show prompt
 ipcRenderer.on('meeting-detected', () => {
   console.log('[Renderer] Meeting detected — showing prompt');
