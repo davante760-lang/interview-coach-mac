@@ -51,20 +51,54 @@ let _dismissedUntil        = 0;      // epoch ms — cooldown after dismiss
 
 function detectVideoMeeting() {
   return new Promise((resolve) => {
-    // --- Check 1: Zoom in-call processes ---
-    // CptHost only spawns when actively in a Zoom call (camera-agnostic).
-    // ZoomAudioService only runs during active calls.
-    // Note: avconferenced/VDCAssistant are always-on system daemons — excluded.
-    // Note: FaceTime background process always runs on macOS — excluded.
-    // Only check dedicated in-call processes — these ONLY exist during an active call.
-    // Broad checks (lsof CoreAudio, VDCAssistant) cause false positives and are excluded.
-    const inCallProcs = [
-      'CptHost',         // Zoom conference host — only spawns during an active Zoom call
-      'webexmeetingapp', // Webex in-meeting binary — only during active Webex calls
-    ];
-    const fullCheck = inCallProcs.map(p => `pgrep -f "${p}" > /dev/null 2>&1`).join(' || ');
 
-    exec(fullCheck, (err) => resolve(err === null || err.code === 0));
+    // --- Check 1: Dedicated in-call native processes (zero false positives) ---
+    const nativeProcs = [
+      'CptHost',         // Zoom — only spawns during an active call
+      'webexmeetingapp', // Webex — only spawns during an active call
+    ];
+    const nativeCheck = nativeProcs.map(p => `pgrep -f "${p}" > /dev/null 2>&1`).join(' || ');
+
+    exec(nativeCheck, (err) => {
+      if (err === null || err.code === 0) return resolve(true);
+
+      // --- Check 2: Browser tab URL check via osascript ---
+      // Reads active tab URLs from Chrome, Edge, and Safari.
+      // Fires for Google Meet, Teams web, Webex web, Zoom web.
+      // Only triggers when a meeting tab is actually open — not on any audio playback.
+      const meetDomains = ['meet.google.com', 'teams.microsoft.com', 'zoom.us/wc', 'webex.com/meet'];
+
+      const chromeScript = [
+        'try', 'tell application "Google Chrome"',
+        '  repeat with w in windows', '    repeat with t in tabs of w',
+        '      set u to URL of t',
+        ...meetDomains.map(d => `      if u contains "${d}" then return "yes"`),
+        '    end repeat', '  end repeat', 'end tell', 'end try',
+      ];
+      const edgeScript = [
+        'try', 'tell application "Microsoft Edge"',
+        '  repeat with w in windows', '    repeat with t in tabs of w',
+        '      set u to URL of t',
+        ...meetDomains.map(d => `      if u contains "${d}" then return "yes"`),
+        '    end repeat', '  end repeat', 'end tell', 'end try',
+      ];
+      const safariScript = [
+        'try', 'tell application "Safari"',
+        '  repeat with w in windows', '    repeat with t in tabs of w',
+        '      set u to URL of t',
+        ...meetDomains.map(d => `      if u contains "${d}" then return "yes"`),
+        '    end repeat', '  end repeat', 'end tell', 'end try',
+      ];
+
+      const fullScript = [...chromeScript, ...edgeScript, ...safariScript, 'return "no"'];
+      const args = [];
+      fullScript.forEach(line => { args.push('-e'); args.push(line); });
+
+      const { execFile } = require('child_process');
+      execFile('osascript', args, { timeout: 3000 }, (err2, stdout) => {
+        resolve((stdout || '').trim() === 'yes');
+      });
+    });
   });
 }
 
