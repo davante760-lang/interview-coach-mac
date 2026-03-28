@@ -56,24 +56,14 @@ function detectVideoMeeting() {
     // ZoomAudioService only runs during active calls.
     // Note: avconferenced/VDCAssistant are always-on system daemons — excluded.
     // Note: FaceTime background process always runs on macOS — excluded.
+    // Only check dedicated in-call processes — these ONLY exist during an active call.
+    // Broad checks (lsof CoreAudio, VDCAssistant) cause false positives and are excluded.
     const inCallProcs = [
-      'CptHost',          // Zoom conference host — only when in a call
-      'ZoomAudioService', // Zoom audio service — only during calls
+      'CptHost',          // Zoom conference host — only spawns during an active call
+      'ZoomAudioService', // Zoom audio — only during calls
       'webexmeetingapp',  // Webex in-meeting binary
     ];
-    const inCallCheck = inCallProcs.map(p => `pgrep -f "${p}" > /dev/null 2>&1`).join(' || ');
-
-    // --- Check 2: Microsoft Teams native app with mic active (camera-agnostic) ---
-    // Teams main process runs all the time, so we can't use pgrep alone.
-    // Instead check if Teams has an active CoreAudio input handle — only present during a call.
-    const teamsCheck = `lsof 2>/dev/null | grep -i "Microsoft Teams" | grep -qi "AppleHDA\\|CoreAudio\\|iSubDriver"`;
-
-    // --- Check 3: Camera active via VDCAssistant (catches any browser video call with camera on) ---
-    // VDCAssistant is the macOS camera arbitration daemon — it ONLY runs when a process
-    // has an active camera session (Meet, Teams web, FaceTime, etc.). Not always-on.
-    const micCheck = `pgrep -f "VDCAssistant" > /dev/null 2>&1`;
-
-    const fullCheck = `(${inCallCheck}) || (${teamsCheck}) || (${micCheck})`;
+    const fullCheck = inCallProcs.map(p => `pgrep -f "${p}" > /dev/null 2>&1`).join(' || ');
 
     exec(fullCheck, (err) => resolve(err === null || err.code === 0));
   });
