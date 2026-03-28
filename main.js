@@ -68,9 +68,10 @@ function detectVideoMeeting() {
     // Instead check if Teams has an active CoreAudio input handle — only present during a call.
     const teamsCheck = `lsof 2>/dev/null | grep -i "Microsoft Teams" | grep -qi "AppleHDA\\|CoreAudio\\|iSubDriver"`;
 
-    // --- Check 3: Browser mic-in-use (Google Meet / Teams web / Webex web) ---
-    // Only fires when the browser is actively capturing the microphone in a WebRTC call.
-    const micCheck = `lsof 2>/dev/null | grep -E "(Google Chrome Helper|firefox-bin|Safari|msedge)" | grep -qi "AppleHDA\\|CoreAudio\\|iSubDriver"`;
+    // --- Check 3: Camera active via VDCAssistant (catches any browser video call with camera on) ---
+    // VDCAssistant is the macOS camera arbitration daemon — it ONLY runs when a process
+    // has an active camera session (Meet, Teams web, FaceTime, etc.). Not always-on.
+    const micCheck = `pgrep -f "VDCAssistant" > /dev/null 2>&1`;
 
     const fullCheck = `(${inCallCheck}) || (${teamsCheck}) || (${micCheck})`;
 
