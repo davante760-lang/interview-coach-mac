@@ -50,33 +50,28 @@ let _dismissedUntil        = 0;      // epoch ms — cooldown after dismiss
 
 function detectVideoMeeting() {
   return new Promise((resolve) => {
-    // --- Check 1: Camera in use (any video call with camera on) ---
-    const cameraCheck = [
-      'pgrep -x avconferenced',   // macOS 12+ camera daemon
-      'pgrep -x VDCAssistant',    // macOS 11 and earlier camera daemon
-    ].join(' || ');
-
-    // --- Check 2: Native app in-call processes (camera-agnostic) ---
+    // --- Check 1: Zoom in-call processes ---
+    // CptHost only spawns when actively in a Zoom call (camera-agnostic).
+    // ZoomAudioService only runs during active calls.
+    // Note: avconferenced/VDCAssistant are always-on system daemons — excluded.
+    // Note: FaceTime background process always runs on macOS — excluded.
     const inCallProcs = [
       'CptHost',          // Zoom conference host — only when in a call
       'ZoomAudioService', // Zoom audio service — only during calls
       'webexmeetingapp',  // Webex in-meeting binary
-      'FaceTime',         // Apple FaceTime
     ];
     const inCallCheck = inCallProcs.map(p => `pgrep -f "${p}" > /dev/null 2>&1`).join(' || ');
 
-    // --- Check 3: Microsoft Teams native app with mic active (camera-agnostic) ---
+    // --- Check 2: Microsoft Teams native app with mic active (camera-agnostic) ---
     // Teams main process runs all the time, so we can't use pgrep alone.
-    // Instead check if Teams (or its Helper processes) has an active CoreAudio
-    // input handle — this only appears when actively in a call with mic open.
+    // Instead check if Teams has an active CoreAudio input handle — only present during a call.
     const teamsCheck = `lsof 2>/dev/null | grep -i "Microsoft Teams" | grep -qi "AppleHDA\\|CoreAudio\\|iSubDriver"`;
 
-    // --- Check 4: Browser mic-in-use (Google Meet / Teams web / Webex web, camera off) ---
-    // lsof shows if Chrome/Firefox/Safari has an active audio input handle (WebRTC mic).
-    // This only appears when the browser is actively capturing the microphone.
+    // --- Check 3: Browser mic-in-use (Google Meet / Teams web / Webex web) ---
+    // Only fires when the browser is actively capturing the microphone in a WebRTC call.
     const micCheck = `lsof 2>/dev/null | grep -E "(Google Chrome Helper|firefox-bin|Safari|msedge)" | grep -qi "AppleHDA\\|CoreAudio\\|iSubDriver"`;
 
-    const fullCheck = `(${cameraCheck}) || (${inCallCheck}) || (${teamsCheck}) || (${micCheck})`;
+    const fullCheck = `(${inCallCheck}) || (${teamsCheck}) || (${micCheck})`;
 
     exec(fullCheck, (err) => resolve(err === null || err.code === 0));
   });
