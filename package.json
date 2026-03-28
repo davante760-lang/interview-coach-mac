@@ -12,7 +12,6 @@
   "author": "Interview Coach",
   "dependencies": {
     "electron-updater": "^6.8.3",
-    "node-mac-recorder": "^2.22.9",
     "ws": "^8.19.0"
   },
   "devDependencies": {
