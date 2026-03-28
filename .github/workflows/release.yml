@@ -1,0 +1,37 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile Swift binary
+        run: |
+          swiftc -O \
+            -framework ScreenCaptureKit \
+            -framework CoreMedia \
+            -framework AVFAudio \
+            -framework AudioToolbox \
+            AudioCapture.swift -o AudioCapture
+
+      - name: Build & publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npx electron-builder --mac --publish always
