@@ -33,7 +33,23 @@ jobs:
             -framework AudioToolbox \
             AudioCapture.swift -o AudioCapture
 
+      - name: Check if version already released
+        id: version_check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=v$VERSION" >> $GITHUB_OUTPUT
+          if gh release view "v$VERSION" --repo ${{ github.repository }} > /dev/null 2>&1; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "v$VERSION already released — skipping publish"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "v$VERSION is new — will publish"
+          fi
+
       - name: Build & publish
+        if: steps.version_check.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
