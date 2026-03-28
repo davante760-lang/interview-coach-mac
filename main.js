@@ -327,6 +327,9 @@ function startAudioCapture(prospectName, prospectCompany) {
   if (audioProcess) return Promise.resolve({ ok: true, already: true });
   console.log('[Main] Spawning:', BINARY_PATH);
 
+  // Ensure binary is executable (may lose permissions after install/xattr)
+  try { fs.chmodSync(BINARY_PATH, 0o755); } catch (e) { console.warn('[Main] chmod failed:', e.message); }
+
   audioProcess = spawn(BINARY_PATH, [SERVER_URL, DG_KEY, prospectName || '', prospectCompany || ''], {
     stdio: ['pipe', 'pipe', 'pipe']
   });
