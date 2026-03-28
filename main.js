@@ -3,6 +3,7 @@ const { autoUpdater } = require('electron-updater');
 const { spawn, exec } = require('child_process');
 const path = require('path');
 const fs   = require('fs');
+const http = require('http');
 
 let mainWindow;
 let tray = null;
@@ -302,6 +303,7 @@ app.whenReady().then(async () => {
   buildMenu();
   createWindow();
   createTray();
+  startLocalServer();
   startMeetingDetection();
 
   // Silent background update check on launch (non-blocking)
@@ -315,12 +317,16 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => { /* stay alive in tray */ });
 app.on('before-quit', () => { app.isQuitting = true; stopAudioProcess(); });
 
-ipcMain.handle('start-capture', async (event, { serverUrl, prospectName, prospectCompany }) => {
-  if (audioProcess) return { error: 'Already running' };
+// ── Shared capture logic (used by IPC + local HTTP server) ──────────────────
+
+const SERVER_URL = 'wss://interview-coach-production-9c63.up.railway.app';
+const DG_KEY     = '54d546fe79b59f0f372e78e6cc3e77673649b611';
+
+function startAudioCapture(prospectName, prospectCompany) {
+  if (audioProcess) return Promise.resolve({ ok: true, already: true });
   console.log('[Main] Spawning:', BINARY_PATH);
 
-  const DG_KEY = '54d546fe79b59f0f372e78e6cc3e77673649b611';
-  audioProcess = spawn(BINARY_PATH, [serverUrl, DG_KEY, prospectName || '', prospectCompany || ''], {
+  audioProcess = spawn(BINARY_PATH, [SERVER_URL, DG_KEY, prospectName || '', prospectCompany || ''], {
     stdio: ['pipe', 'pipe', 'pipe']
   });
 
@@ -350,7 +356,7 @@ ipcMain.handle('start-capture', async (event, { serverUrl, prospectName, prospec
   });
 
   updateTrayMenu(true);
-  return await new Promise((resolve) => {
+  return new Promise((resolve) => {
     let done = false;
     const finish = (r) => { if (!done) { done = true; resolve(r); } };
     audioProcess?.stderr.on('data', (d) => {
@@ -363,7 +369,61 @@ ipcMain.handle('start-capture', async (event, { serverUrl, prospectName, prospec
     audioProcess?.on('error', (err) => finish({ error: err.message }));
     setTimeout(() => finish({ ok: true }), 15000);
   });
+}
+
+ipcMain.handle('start-capture', async (event, { prospectName, prospectCompany }) => {
+  return startAudioCapture(prospectName, prospectCompany);
 });
+
+// ── Local HTTP server (web app → Electron trigger) ──────────────────────────
+// Listens on localhost:59842 so the web app can start/stop capture
+// without needing a meeting bot.
+
+function startLocalServer() {
+  const server = http.createServer((req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
+
+    if (req.method === 'GET' && req.url === '/status') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, recording: audioProcess !== null }));
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/start') {
+      let body = '';
+      req.on('data', c => body += c);
+      req.on('end', () => {
+        const data = JSON.parse(body || '{}');
+        startAudioCapture(data.prospectName, data.prospectCompany).then(result => {
+          mainWindow?.show();
+          mainWindow?.focus();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        });
+      });
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/stop') {
+      stopAudioProcess();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+
+    res.writeHead(404); res.end();
+  });
+
+  server.listen(59842, '127.0.0.1', () => {
+    console.log('[LocalServer] Listening on http://localhost:59842');
+  });
+  server.on('error', (err) => {
+    console.log('[LocalServer] Error (non-fatal):', err.message);
+  });
+}
 
 ipcMain.handle('stop-capture', async () => { stopAudioProcess(); return { ok: true }; });
 ipcMain.handle('open-releases-page', () => {
