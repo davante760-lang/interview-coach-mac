@@ -30,24 +30,49 @@ let _meetingStartedCapture = false;  // true if we auto-started because of a mee
 let _meetingEndGraceTimer  = null;
 let _dismissedUntil        = 0;      // epoch ms — cooldown after dismiss
 
-const VIDEO_CALL_PROCS = [
-  'avconferenced',      // macOS camera daemon — fires for ANY video call (browser or native)
-  'VDCAssistant',       // older macOS camera daemon (pre-Monterey)
-  'zoom.us',
-  'CptHost',            // Zoom in-call process
-  'Microsoft Teams',
-  'webex',
-  'Webex Meetings',
-  'Slack',              // Slack huddles
-  'Discord',
-  'FaceTime',
-];
+// Two categories of detection:
+//
+// 1. CAMERA CHECK — avconferenced/VDCAssistant runs ONLY when camera is active
+//    Catches: Zoom (camera on), Meet (camera on), Teams (camera on), FaceTime, etc.
+//
+// 2. IN-CALL PROCESS CHECK — processes that only exist DURING an active call,
+//    even with camera off:
+//    - CptHost: Zoom's conference host — spawned on join, killed on leave (camera-agnostic)
+//    - ZoomAudioService: Zoom audio, only during calls
+//    - webexmeetingapp: Webex in-meeting binary
+//    - FaceTime: Apple calls (camera usually on but checked here too)
+//
+// 3. MIC-IN-USE CHECK — catches browser meetings (Meet, Teams web, Webex web)
+//    with camera off. Uses lsof to see if a browser has CoreAudio input open.
+//    Browsers (Chrome/Firefox/Safari) only open audio input when actively
+//    using the microphone in a WebRTC call.
 
 function detectVideoMeeting() {
   return new Promise((resolve) => {
-    // pgrep with -f flag searches full command line; exit 0 = found
-    const checks = VIDEO_CALL_PROCS.map(p => `pgrep -f "${p}" > /dev/null 2>&1`).join(' || ');
-    exec(checks, (err) => resolve(err === null || err.code === 0));
+    // --- Check 1: Camera in use (any video call with camera on) ---
+    const cameraCheck = [
+      'pgrep -x avconferenced',   // macOS 12+ camera daemon
+      'pgrep -x VDCAssistant',    // macOS 11 and earlier camera daemon
+    ].join(' || ');
+
+    // --- Check 2: Native app in-call processes (camera-agnostic) ---
+    const inCallProcs = [
+      'CptHost',          // Zoom conference host — only when in a call
+      'ZoomAudioService', // Zoom audio service — only during calls
+      'webexmeetingapp',  // Webex in-meeting binary
+      'FaceTime',         // Apple FaceTime
+    ];
+    const inCallCheck = inCallProcs.map(p => `pgrep -f "${p}" > /dev/null 2>&1`).join(' || ');
+
+    // --- Check 3: Browser mic-in-use (Google Meet / Teams web / Webex web, camera off) ---
+    // lsof shows if Chrome/Firefox/Safari has an active audio input handle (WebRTC mic).
+    // This only appears when the browser is actively capturing the microphone.
+    // We exclude our own process to avoid false-positives during recording.
+    const micCheck = `lsof 2>/dev/null | grep -E "(Google Chrome Helper|firefox-bin|Safari|msedge)" | grep -qi "AppleHDA\\|CoreAudio\\|iSubDriver"`;
+
+    const fullCheck = `(${cameraCheck}) || (${inCallCheck}) || (${micCheck})`;
+
+    exec(fullCheck, (err) => resolve(err === null || err.code === 0));
   });
 }
 
