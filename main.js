@@ -366,7 +366,9 @@ ipcMain.handle('start-capture', async (event, { serverUrl, prospectName, prospec
 });
 
 ipcMain.handle('stop-capture', async () => { stopAudioProcess(); return { ok: true }; });
-ipcMain.handle('quit-and-install', () => { autoUpdater.quitAndInstall(false, true); });
+ipcMain.handle('open-releases-page', () => {
+  require('electron').shell.openExternal('https://github.com/davante760-lang/interview-coach-mac/releases/latest');
+});
 ipcMain.handle('check-binary', async () => {
   return { exists: fs.existsSync(BINARY_PATH), path: BINARY_PATH };
 });

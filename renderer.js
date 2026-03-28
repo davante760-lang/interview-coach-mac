@@ -171,7 +171,7 @@ ipcRenderer.on('update-downloaded', (event, version) => {
 });
 
 function restartToUpdate() {
-  ipcRenderer.invoke('quit-and-install');
+  ipcRenderer.invoke('open-releases-page');
 }
 
 ipcRenderer.on('audio-stopped', (event, { code, signal }) => {
