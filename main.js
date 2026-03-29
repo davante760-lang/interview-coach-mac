@@ -317,6 +317,26 @@ function createWindow() {
   });
 }
 
+// ── URL Scheme: interviewcoach://start ───────────────────────────────────────
+// Allows the web UI to launch and start recording even if the app is closed.
+// Register as default handler for interviewcoach:// protocol.
+app.setAsDefaultProtocolClient('interviewcoach');
+
+// Handle deep link on macOS (app already running)
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  console.log('[DeepLink] Received:', url);
+  if (url.startsWith('interviewcoach://start')) {
+    mainWindow?.show();
+    // Small delay to let the app surface before starting capture
+    setTimeout(() => {
+      startAudioCapture('', '').then(() => {
+        console.log('[DeepLink] Audio capture started via URL scheme');
+      }).catch(e => console.error('[DeepLink] Start failed:', e.message));
+    }, 500);
+  }
+});
+
 app.whenReady().then(async () => {
   if (process.platform === 'darwin') {
     const mic = systemPreferences.getMediaAccessStatus('microphone');
@@ -329,6 +349,18 @@ app.whenReady().then(async () => {
   createTray();
   startLocalServer();
   startMeetingDetection();
+
+  // Handle deep link when app was closed and launched via URL scheme
+  // (on macOS, argv contains the URL when cold-launched via protocol)
+  const coldLaunchUrl = process.argv.find(a => a.startsWith('interviewcoach://'));
+  if (coldLaunchUrl) {
+    console.log('[DeepLink] Cold launch via URL scheme:', coldLaunchUrl);
+    setTimeout(() => {
+      startAudioCapture('', '').then(() => {
+        console.log('[DeepLink] Audio capture started (cold launch)');
+      }).catch(e => console.error('[DeepLink] Cold start failed:', e.message));
+    }, 1500);
+  }
 
   // Silent background update check on launch (non-blocking)
   setTimeout(() => {

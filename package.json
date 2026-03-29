@@ -1,6 +1,6 @@
 {
   "name": "interview-coach-desktop",
-  "version": "2.1.13",
+  "version": "2.1.14",
   "description": "Captures system audio via ScreenCaptureKit and streams to Interview Coach",
   "main": "main.js",
   "scripts": {
@@ -26,6 +26,12 @@
       "renderer.js",
       "index.html",
       "trayTemplate.png"
+    ],
+    "protocols": [
+      {
+        "name": "Interview Coach",
+        "schemes": ["interviewcoach"]
+      }
     ],
     "mac": {
       "category": "public.app-category.productivity",
