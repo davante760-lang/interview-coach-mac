@@ -42,7 +42,7 @@
         "dmg",
         "zip"
       ],
-      "identity": null,
+      "identity": "-",
       "entitlements": "entitlements.mac.plist",
       "entitlementsInherit": "entitlements.mac.plist",
       "extendInfo": {
