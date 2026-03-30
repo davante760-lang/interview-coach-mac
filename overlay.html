@@ -16,6 +16,25 @@
       flex-direction: column;
     }
 
+    /* ── Ghost state — always visible pulsing outline ── */
+    @keyframes ghost-pulse {
+      0%, 100% { border-color: rgba(99,102,241,0.2); box-shadow: 0 0 0 0 rgba(99,102,241,0); }
+      50%       { border-color: rgba(99,102,241,0.5); box-shadow: 0 0 12px 2px rgba(99,102,241,0.15); }
+    }
+
+    #ghost {
+      position: fixed;
+      inset: 0;
+      border: 1.5px solid rgba(99,102,241,0.25);
+      border-radius: 14px;
+      animation: ghost-pulse 2.5s ease-in-out infinite;
+      pointer-events: none;
+      transition: opacity 0.3s;
+      opacity: 1;
+    }
+
+    #ghost.hidden { opacity: 0; }
+
     /* ── Drag bar ── */
     #drag-bar {
       height: 28px;
@@ -34,7 +53,6 @@
     #drag-bar .dot { width: 4px; height: 4px; border-radius: 50%; background: rgba(255,255,255,0.5); }
     body:hover #drag-bar { opacity: 1; }
 
-    /* Gear button lives in drag-bar but is no-drag */
     #btn-settings {
       position: absolute;
       right: 8px;
@@ -66,48 +84,20 @@
     #settings-panel.visible { display: block; }
 
     .sp-title {
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 1px;
-      text-transform: uppercase;
-      color: rgba(165,180,252,0.75);
-      margin-bottom: 14px;
+      font-size: 10px; font-weight: 700; letter-spacing: 1px;
+      text-transform: uppercase; color: rgba(165,180,252,0.75); margin-bottom: 14px;
     }
+    .sp-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 10px; }
+    .sp-label { font-size: 12px; color: rgba(255,255,255,0.65); white-space: nowrap; min-width: 100px; }
+    .sp-val { font-size: 11px; color: rgba(165,180,252,0.8); min-width: 32px; text-align: right; }
 
-    .sp-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 14px;
-      gap: 10px;
-    }
-    .sp-label {
-      font-size: 12px;
-      color: rgba(255,255,255,0.65);
-      white-space: nowrap;
-      min-width: 100px;
-    }
-    .sp-val {
-      font-size: 11px;
-      color: rgba(165,180,252,0.8);
-      min-width: 32px;
-      text-align: right;
-    }
     input[type=range] {
-      -webkit-appearance: none;
-      flex: 1;
-      height: 4px;
-      border-radius: 2px;
-      background: rgba(99,102,241,0.3);
-      outline: none;
-      cursor: pointer;
+      -webkit-appearance: none; flex: 1; height: 4px;
+      border-radius: 2px; background: rgba(99,102,241,0.3); outline: none; cursor: pointer;
     }
     input[type=range]::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      width: 14px; height: 14px;
-      border-radius: 50%;
-      background: #818cf8;
-      cursor: pointer;
+      -webkit-appearance: none; width: 14px; height: 14px;
+      border-radius: 50%; background: #818cf8; cursor: pointer;
     }
 
     /* ── Main card ── */
@@ -129,96 +119,68 @@
     #card.visible { opacity: 1; transform: translateY(0); }
 
     #question-label {
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 1px;
-      text-transform: uppercase;
-      color: rgba(165, 180, 252, 0.75);
-      margin-bottom: 6px;
+      font-size: 10px; font-weight: 700; letter-spacing: 1px;
+      text-transform: uppercase; color: rgba(165,180,252,0.75); margin-bottom: 6px;
     }
     #question {
-      font-size: var(--q-font, 13px);
-      color: rgba(255,255,255,0.6);
-      line-height: var(--line-height, 1.7);
-      margin-bottom: 12px;
-      font-style: italic;
+      font-size: var(--q-font, 13px); color: rgba(255,255,255,0.6);
+      line-height: var(--line-height, 1.7); margin-bottom: 12px; font-style: italic;
     }
     #answer-label {
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 1px;
-      text-transform: uppercase;
-      color: rgba(165, 180, 252, 0.75);
-      margin-bottom: 7px;
+      font-size: 10px; font-weight: 700; letter-spacing: 1px;
+      text-transform: uppercase; color: rgba(165,180,252,0.75); margin-bottom: 7px;
     }
     #answer {
-      font-size: var(--a-font, 15px);
-      color: #f1f5f9;
-      line-height: var(--line-height, 1.7);
-      font-weight: 400;
+      font-size: var(--a-font, 15px); color: #f1f5f9;
+      line-height: var(--line-height, 1.7); font-weight: 400;
     }
 
     #dismiss {
-      position: absolute;
-      top: 10px; right: 10px;
-      width: 22px; height: 22px;
-      border-radius: 50%;
-      background: rgba(255,255,255,0.1);
-      border: none;
-      color: rgba(255,255,255,0.5);
-      font-size: 11px;
-      cursor: pointer;
+      position: absolute; top: 10px; right: 10px;
+      width: 22px; height: 22px; border-radius: 50%;
+      background: rgba(255,255,255,0.1); border: none;
+      color: rgba(255,255,255,0.5); font-size: 11px; cursor: pointer;
       display: flex; align-items: center; justify-content: center;
-      -webkit-app-region: no-drag;
-      transition: background 0.15s;
+      -webkit-app-region: no-drag; transition: background 0.15s;
     }
     #dismiss:hover { background: rgba(255,255,255,0.22); color: #fff; }
 
     /* ── Test mode ── */
     #test-mode {
-      display: none;
-      text-align: center;
-      padding: 20px 16px;
-      color: rgba(165,180,252,0.7);
-      font-size: 13px;
-      line-height: 1.7;
-      flex: 1;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
+      display: none; text-align: center; padding: 20px 16px;
+      color: rgba(165,180,252,0.7); font-size: 13px; line-height: 1.7;
+      flex: 1; flex-direction: column; align-items: center; justify-content: center;
     }
     #test-mode.visible { display: flex; }
   </style>
 </head>
 <body>
+  <!-- Always-visible ghost outline -->
+  <div id="ghost"></div>
+
   <div id="drag-bar">
     <div class="dot"></div><div class="dot"></div><div class="dot"></div>
     <div class="dot"></div><div class="dot"></div><div class="dot"></div>
     <button id="btn-settings" onclick="toggleSettings()" title="Overlay settings">⚙</button>
   </div>
 
-  <!-- Settings panel -->
   <div id="settings-panel">
     <div class="sp-title">Overlay Settings</div>
-
     <div class="sp-row">
       <span class="sp-label">Answer font</span>
       <input type="range" id="sl-a-font" min="12" max="22" step="1" oninput="applyPrefs()">
       <span class="sp-val" id="lbl-a-font">15px</span>
     </div>
-
     <div class="sp-row">
       <span class="sp-label">Question font</span>
       <input type="range" id="sl-q-font" min="10" max="18" step="1" oninput="applyPrefs()">
       <span class="sp-val" id="lbl-q-font">13px</span>
     </div>
-
     <div class="sp-row">
       <span class="sp-label">Line spacing</span>
       <input type="range" id="sl-lh" min="1.2" max="2.4" step="0.1" oninput="applyPrefs()">
       <span class="sp-val" id="lbl-lh">1.7</span>
     </div>
-
     <div class="sp-row">
       <span class="sp-label">Background</span>
       <input type="range" id="sl-opacity" min="0.5" max="1.0" step="0.05" oninput="applyPrefs()">
@@ -226,14 +188,12 @@
     </div>
   </div>
 
-  <!-- Test mode -->
   <div id="test-mode" class="visible">
     <div style="font-size:12px;font-weight:700;color:#a5b4fc;margin-bottom:8px;letter-spacing:0.5px">OVERLAY POSITION</div>
     Drag this window to where you want<br>coaching cards to appear.<br>
     <div style="margin-top:10px;font-size:11px;opacity:0.5">Resize from any edge.<br>Hover top-right for settings ⚙</div>
   </div>
 
-  <!-- Coaching card -->
   <div id="card">
     <button id="dismiss" onclick="dismissCard()">✕</button>
     <div id="question-label">Question</div>
@@ -245,52 +205,62 @@
   <script>
     const { ipcRenderer } = require('electron');
 
-    // ── Prefs ──────────────────────────────────────────────────────────────────
     const DEFAULTS = { aFont: 15, qFont: 13, lineHeight: 1.7, bgOpacity: 0.95 };
     let prefs = { ...DEFAULTS };
     let settingsOpen = false;
     let _dismissTimer = null;
+    let _isGhost = true; // start in ghost state
 
+    // ── Mouse enter/leave → tell main to toggle click-through ──
+    document.addEventListener('mouseenter', () => {
+      ipcRenderer.send('overlay-mouse-enter');
+    });
+    document.addEventListener('mouseleave', () => {
+      if (_isGhost) ipcRenderer.send('overlay-mouse-leave');
+    });
+
+    function setGhostState(ghost) {
+      _isGhost = ghost;
+      const g = document.getElementById('ghost');
+      if (ghost) {
+        g.classList.remove('hidden');
+        ipcRenderer.send('overlay-mouse-leave'); // re-enable click-through
+      } else {
+        g.classList.add('hidden');
+      }
+    }
+
+    // ── Prefs ──
     function loadPrefs() {
       try {
         const raw = localStorage.getItem('overlayPrefs');
         if (raw) prefs = { ...DEFAULTS, ...JSON.parse(raw) };
       } catch {}
     }
-
     function savePrefs() {
       try { localStorage.setItem('overlayPrefs', JSON.stringify(prefs)); } catch {}
     }
-
     function applyPrefs() {
-      // Read sliders
       prefs.aFont      = parseFloat(document.getElementById('sl-a-font').value);
       prefs.qFont      = parseFloat(document.getElementById('sl-q-font').value);
       prefs.lineHeight = parseFloat(document.getElementById('sl-lh').value);
       prefs.bgOpacity  = parseFloat(document.getElementById('sl-opacity').value);
-
-      // Update labels
       document.getElementById('lbl-a-font').textContent  = prefs.aFont + 'px';
       document.getElementById('lbl-q-font').textContent  = prefs.qFont + 'px';
       document.getElementById('lbl-lh').textContent      = prefs.lineHeight.toFixed(1);
       document.getElementById('lbl-opacity').textContent = Math.round(prefs.bgOpacity * 100) + '%';
-
-      // Apply to CSS vars
       const r = document.documentElement;
       r.style.setProperty('--a-font',      prefs.aFont + 'px');
       r.style.setProperty('--q-font',      prefs.qFont + 'px');
       r.style.setProperty('--line-height', prefs.lineHeight);
       r.style.setProperty('--bg-opacity',  prefs.bgOpacity);
-
       savePrefs();
     }
-
     function syncSliders() {
-      document.getElementById('sl-a-font').value   = prefs.aFont;
-      document.getElementById('sl-q-font').value   = prefs.qFont;
-      document.getElementById('sl-lh').value       = prefs.lineHeight;
-      document.getElementById('sl-opacity').value  = prefs.bgOpacity;
-      // Trigger label + CSS update without re-reading sliders
+      document.getElementById('sl-a-font').value  = prefs.aFont;
+      document.getElementById('sl-q-font').value  = prefs.qFont;
+      document.getElementById('sl-lh').value      = prefs.lineHeight;
+      document.getElementById('sl-opacity').value = prefs.bgOpacity;
       document.getElementById('lbl-a-font').textContent  = prefs.aFont + 'px';
       document.getElementById('lbl-q-font').textContent  = prefs.qFont + 'px';
       document.getElementById('lbl-lh').textContent      = prefs.lineHeight.toFixed(1);
@@ -305,14 +275,14 @@
     function toggleSettings() {
       settingsOpen = !settingsOpen;
       document.getElementById('settings-panel').classList.toggle('visible', settingsOpen);
-      // Hide other panels when settings open
       if (settingsOpen) {
         document.getElementById('card').classList.remove('visible');
         document.getElementById('test-mode').classList.remove('visible');
+        setGhostState(false);
       }
     }
 
-    // ── IPC ────────────────────────────────────────────────────────────────────
+    // ── IPC ──
     ipcRenderer.on('overlay-coaching', (event, data) => {
       settingsOpen = false;
       document.getElementById('settings-panel').classList.remove('visible');
@@ -323,6 +293,7 @@
       card.classList.remove('visible');
       void card.offsetWidth;
       card.classList.add('visible');
+      setGhostState(false);
 
       if (_dismissTimer) clearTimeout(_dismissTimer);
       _dismissTimer = setTimeout(dismissCard, 45000);
@@ -333,6 +304,7 @@
       document.getElementById('settings-panel').classList.remove('visible');
       document.getElementById('test-mode').classList.add('visible');
       document.getElementById('card').classList.remove('visible');
+      setGhostState(false);
     });
 
     ipcRenderer.on('overlay-dismiss', () => dismissCard());
@@ -340,16 +312,23 @@
     function dismissCard() {
       if (_dismissTimer) { clearTimeout(_dismissTimer); _dismissTimer = null; }
       document.getElementById('card').classList.remove('visible');
+      document.getElementById('test-mode').classList.remove('visible');
+      settingsOpen = false;
+      document.getElementById('settings-panel').classList.remove('visible');
+      setGhostState(true); // fade to pulsing outline
     }
 
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
-        if (settingsOpen) { settingsOpen = false; document.getElementById('settings-panel').classList.remove('visible'); }
-        else dismissCard();
+        if (settingsOpen) {
+          settingsOpen = false;
+          document.getElementById('settings-panel').classList.remove('visible');
+        } else {
+          dismissCard();
+        }
       }
     });
 
-    // ── Init ───────────────────────────────────────────────────────────────────
     loadPrefs();
     syncSliders();
   </script>

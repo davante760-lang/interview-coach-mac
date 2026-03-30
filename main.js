@@ -343,6 +343,7 @@ function createOverlayWindow() {
   overlayWindow.loadFile('overlay.html');
   overlayWindow.setAlwaysOnTop(true, 'screen-saver'); // highest level — floats over everything
   overlayWindow.setVisibleOnAllWorkspaces(true);
+  overlayWindow.setIgnoreMouseEvents(true, { forward: true }); // click-through by default (ghost state)
 
   // Save position and size whenever user moves or resizes
   const saveOverlayBounds = () => {
@@ -588,6 +589,15 @@ ipcMain.handle('overlay-show', () => {
 });
 ipcMain.handle('overlay-hide', () => {
   overlayWindow?.hide();
+});
+
+// Click-through: pass mouse events through when in ghost state, intercept when hovered
+ipcMain.on('overlay-mouse-enter', () => {
+  overlayWindow?.setIgnoreMouseEvents(false);
+});
+ipcMain.on('overlay-mouse-leave', () => {
+  // Forward: true means mouse events still reach the overlay for hover detection
+  overlayWindow?.setIgnoreMouseEvents(true, { forward: true });
 });
 ipcMain.handle('overlay-test', () => {
   if (!overlayWindow) createOverlayWindow();
