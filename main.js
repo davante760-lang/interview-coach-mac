@@ -322,15 +322,19 @@ function createOverlayWindow() {
   const settings = loadSettings();
   const x = settings.overlayX ?? 40;
   const y = settings.overlayY ?? 40;
+  const w = settings.overlayW ?? 480;
+  const h = settings.overlayH ?? 320;
 
   overlayWindow = new BrowserWindow({
-    width: 420,
-    height: 280,
+    width: w,
+    height: h,
+    minWidth: 320,
+    minHeight: 200,
     x, y,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
-    resizable: false,
+    resizable: true,
     skipTaskbar: true,
     hasShadow: false,
     webPreferences: { nodeIntegration: true, contextIsolation: false }
@@ -340,14 +344,17 @@ function createOverlayWindow() {
   overlayWindow.setAlwaysOnTop(true, 'screen-saver'); // highest level — floats over everything
   overlayWindow.setVisibleOnAllWorkspaces(true);
 
-  // Save position whenever user drags it
-  overlayWindow.on('moved', () => {
+  // Save position and size whenever user moves or resizes
+  const saveOverlayBounds = () => {
     const [wx, wy] = overlayWindow.getPosition();
+    const [ww, wh] = overlayWindow.getSize();
     const s = loadSettings();
-    s.overlayX = wx;
-    s.overlayY = wy;
+    s.overlayX = wx; s.overlayY = wy;
+    s.overlayW = ww; s.overlayH = wh;
     saveSettings(s);
-  });
+  };
+  overlayWindow.on('moved', saveOverlayBounds);
+  overlayWindow.on('resized', saveOverlayBounds);
 
   overlayWindow.on('closed', () => { overlayWindow = null; });
 }
