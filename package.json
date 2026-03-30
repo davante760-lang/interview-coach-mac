@@ -15,8 +15,8 @@
     "ws": "^8.19.0"
   },
   "devDependencies": {
-    "electron": "^35.0.0",
-    "electron-builder": "^25.0.0"
+    "electron": "^41.1.0",
+    "electron-builder": "^26.8.1"
   },
   "build": {
     "appId": "com.interviewcoach.desktop",
@@ -25,12 +25,15 @@
       "main.js",
       "renderer.js",
       "index.html",
+      "overlay.html",
       "trayTemplate.png"
     ],
     "protocols": [
       {
         "name": "Interview Coach",
-        "schemes": ["interviewcoach"]
+        "schemes": [
+          "interviewcoach"
+        ]
       }
     ],
     "mac": {
