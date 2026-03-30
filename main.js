@@ -322,8 +322,8 @@ function createOverlayWindow() {
   const settings = loadSettings();
   const x = settings.overlayX ?? 40;
   const y = settings.overlayY ?? 40;
-  const w = settings.overlayW ?? 480;
-  const h = settings.overlayH ?? 320;
+  const w = settings.overlayW ?? 420;
+  const h = settings.overlayH ?? 300;
 
   overlayWindow = new BrowserWindow({
     width: w,
@@ -379,6 +379,9 @@ app.on('open-url', (event, url) => {
   }
 });
 
+// Overlay is created on demand (when user clicks the Overlay button or a coaching card fires)
+// Do NOT auto-create on startup.
+
 app.whenReady().then(async () => {
   if (process.platform === 'darwin') {
     const mic = systemPreferences.getMediaAccessStatus('microphone');
@@ -389,7 +392,7 @@ app.whenReady().then(async () => {
   buildMenu();
   createWindow();
   createTray();
-  createOverlayWindow();
+  // Overlay created on demand — not on startup
   startLocalServer();
   startMeetingDetection();
 
