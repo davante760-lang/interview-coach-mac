@@ -4,7 +4,7 @@
   "description": "Captures system audio via ScreenCaptureKit and streams to Interview Coach",
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
+    "start": "cp AudioCapture node_modules/electron/dist/Electron.app/Contents/MacOS/AudioCapture 2>/dev/null; electron .",
     "build-swift": "cd audio-capture && bash build.sh",
     "build": "electron-builder --mac",
     "release": "electron-builder --mac --publish always"
@@ -42,7 +42,7 @@
         "dmg",
         "zip"
       ],
-      "identity": "-",
+      "identity": null,
       "entitlements": "entitlements.mac.plist",
       "entitlementsInherit": "entitlements.mac.plist",
       "extendInfo": {
