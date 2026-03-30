@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: transparent;
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+      -webkit-user-select: none;
+      user-select: none;
+      overflow: hidden;
+    }
+
+    #drag-bar {
+      height: 18px;
+      width: 100%;
+      -webkit-app-region: drag;
+      cursor: grab;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+
+    #drag-bar .dot {
+      width: 3px; height: 3px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.4);
+    }
+
+    body:hover #drag-bar { opacity: 1; }
+
+    #card {
+      background: rgba(10, 10, 20, 0.88);
+      border: 1px solid rgba(99, 102, 241, 0.5);
+      border-radius: 12px;
+      padding: 14px 16px;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 0.25s ease, transform 0.25s ease;
+      position: relative;
+    }
+
+    #card.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    #question-label {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      color: rgba(165, 180, 252, 0.7);
+      margin-bottom: 6px;
+    }
+
+    #question {
+      font-size: 11px;
+      color: rgba(255,255,255,0.5);
+      line-height: 1.4;
+      margin-bottom: 10px;
+      font-style: italic;
+    }
+
+    #answer-label {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      color: rgba(165, 180, 252, 0.7);
+      margin-bottom: 6px;
+    }
+
+    #answer {
+      font-size: 13px;
+      color: #f1f5f9;
+      line-height: 1.65;
+      font-weight: 400;
+    }
+
+    #dismiss {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.08);
+      border: none;
+      color: rgba(255,255,255,0.4);
+      font-size: 10px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      -webkit-app-region: no-drag;
+      transition: background 0.15s;
+    }
+
+    #dismiss:hover {
+      background: rgba(255,255,255,0.18);
+      color: #fff;
+    }
+
+    #test-mode {
+      display: none;
+      text-align: center;
+      padding: 16px;
+      color: rgba(165,180,252,0.6);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    #test-mode.visible { display: block; }
+  </style>
+</head>
+<body>
+  <div id="drag-bar">
+    <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+    <div class="dot"></div><div class="dot"></div>
+  </div>
+
+  <div id="test-mode" class="visible">
+    <div style="font-size:11px;font-weight:700;color:#a5b4fc;margin-bottom:6px">OVERLAY TEST MODE</div>
+    Drag this window to where you want<br>coaching cards to appear.<br>
+    <div style="margin-top:8px;font-size:10px;opacity:0.6">Position is saved automatically.</div>
+  </div>
+
+  <div id="card">
+    <button id="dismiss" onclick="dismissCard()">✕</button>
+    <div id="question-label">Question</div>
+    <div id="question"></div>
+    <div id="answer-label">Say This</div>
+    <div id="answer"></div>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+
+    let _dismissTimer = null;
+
+    ipcRenderer.on('overlay-coaching', (event, data) => {
+      document.getElementById('test-mode').classList.remove('visible');
+      document.getElementById('question').textContent = data.question || '';
+      document.getElementById('answer').textContent = data.answer || '';
+      const card = document.getElementById('card');
+      card.classList.remove('visible');
+      void card.offsetWidth; // force reflow
+      card.classList.add('visible');
+
+      // Auto-dismiss after 35s
+      if (_dismissTimer) clearTimeout(_dismissTimer);
+      _dismissTimer = setTimeout(dismissCard, 35000);
+    });
+
+    ipcRenderer.on('overlay-test-mode', () => {
+      document.getElementById('test-mode').classList.add('visible');
+      document.getElementById('card').classList.remove('visible');
+    });
+
+    ipcRenderer.on('overlay-dismiss', () => dismissCard());
+
+    function dismissCard() {
+      if (_dismissTimer) { clearTimeout(_dismissTimer); _dismissTimer = null; }
+      document.getElementById('card').classList.remove('visible');
+    }
+
+    // Keyboard: Escape to dismiss
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') dismissCard();
+    });
+  </script>
+</body>
+</html>

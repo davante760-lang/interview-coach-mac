@@ -6,6 +6,7 @@ const fs   = require('fs');
 const http = require('http');
 
 let mainWindow;
+let overlayWindow = null;
 let tray = null;
 let audioProcess = null;
 
@@ -317,6 +318,40 @@ function createWindow() {
   });
 }
 
+function createOverlayWindow() {
+  const settings = loadSettings();
+  const x = settings.overlayX ?? 40;
+  const y = settings.overlayY ?? 40;
+
+  overlayWindow = new BrowserWindow({
+    width: 420,
+    height: 280,
+    x, y,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    resizable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    webPreferences: { nodeIntegration: true, contextIsolation: false }
+  });
+
+  overlayWindow.loadFile('overlay.html');
+  overlayWindow.setAlwaysOnTop(true, 'screen-saver'); // highest level — floats over everything
+  overlayWindow.setVisibleOnAllWorkspaces(true);
+
+  // Save position whenever user drags it
+  overlayWindow.on('moved', () => {
+    const [wx, wy] = overlayWindow.getPosition();
+    const s = loadSettings();
+    s.overlayX = wx;
+    s.overlayY = wy;
+    saveSettings(s);
+  });
+
+  overlayWindow.on('closed', () => { overlayWindow = null; });
+}
+
 // ── URL Scheme: interviewcoach://start ───────────────────────────────────────
 // Allows the web UI to launch and start recording even if the app is closed.
 // Register as default handler for interviewcoach:// protocol.
@@ -347,6 +382,7 @@ app.whenReady().then(async () => {
   buildMenu();
   createWindow();
   createTray();
+  createOverlayWindow();
   startLocalServer();
   startMeetingDetection();
 
@@ -477,6 +513,38 @@ function startLocalServer() {
       return;
     }
 
+    if (req.method === 'POST' && req.url === '/overlay/coaching') {
+      let body = '';
+      req.on('data', c => body += c);
+      req.on('end', () => {
+        try {
+          const data = JSON.parse(body || '{}');
+          if (!overlayWindow) createOverlayWindow();
+          overlayWindow.show();
+          overlayWindow.webContents.send('overlay-coaching', data);
+        } catch (e) {}
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      });
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/overlay/test') {
+      if (!overlayWindow) createOverlayWindow();
+      overlayWindow.show();
+      overlayWindow.webContents.send('overlay-test-mode');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/overlay/hide') {
+      overlayWindow?.hide();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+
     res.writeHead(404); res.end();
   });
 
@@ -489,6 +557,28 @@ function startLocalServer() {
 }
 
 ipcMain.handle('stop-capture', async () => { stopAudioProcess(); return { ok: true }; });
+
+// Overlay IPC
+ipcMain.handle('overlay-show', () => {
+  if (!overlayWindow) createOverlayWindow();
+  overlayWindow.show();
+});
+ipcMain.handle('overlay-hide', () => {
+  overlayWindow?.hide();
+});
+ipcMain.handle('overlay-test', () => {
+  if (!overlayWindow) createOverlayWindow();
+  overlayWindow.show();
+  overlayWindow.webContents.send('overlay-test-mode');
+});
+ipcMain.handle('overlay-coaching', (event, data) => {
+  if (!overlayWindow) createOverlayWindow();
+  overlayWindow.show();
+  overlayWindow.webContents.send('overlay-coaching', data);
+});
+ipcMain.handle('overlay-dismiss', () => {
+  overlayWindow?.webContents.send('overlay-dismiss');
+});
 ipcMain.handle('open-releases-page', () => {
   require('electron').shell.openExternal('https://github.com/davante760-lang/interview-coach-mac/releases/latest');
 });
