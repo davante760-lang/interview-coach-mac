@@ -548,11 +548,24 @@ function startLocalServer() {
     res.writeHead(404); res.end();
   });
 
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.log('[LocalServer] Port 59842 in use — killing stale process and retrying...');
+      // Kill whatever is holding the port, then retry after 500ms
+      const { exec } = require('child_process');
+      exec("lsof -ti:59842 | xargs kill -9", () => {
+        setTimeout(() => {
+          server.listen(59842, '127.0.0.1', () => {
+            console.log('[LocalServer] Listening on http://localhost:59842 (after port reclaim)');
+          });
+        }, 500);
+      });
+    } else {
+      console.log('[LocalServer] Error (non-fatal):', err.message);
+    }
+  });
   server.listen(59842, '127.0.0.1', () => {
     console.log('[LocalServer] Listening on http://localhost:59842');
-  });
-  server.on('error', (err) => {
-    console.log('[LocalServer] Error (non-fatal):', err.message);
   });
 }
 
