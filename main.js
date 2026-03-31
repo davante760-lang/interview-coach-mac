@@ -363,7 +363,12 @@ function createOverlayWindow() {
 // ── URL Scheme: interviewcoach://start ───────────────────────────────────────
 // Allows the web UI to launch and start recording even if the app is closed.
 // Register as default handler for interviewcoach:// protocol.
-app.setAsDefaultProtocolClient('interviewcoach');
+// In dev mode (electron .), pass the app path so macOS launches the app correctly.
+if (process.defaultApp && process.argv.length >= 2) {
+  app.setAsDefaultProtocolClient('interviewcoach', process.execPath, [path.resolve(process.argv[1])]);
+} else {
+  app.setAsDefaultProtocolClient('interviewcoach');
+}
 
 // Handle deep link on macOS (app already running)
 app.on('open-url', (event, url) => {
