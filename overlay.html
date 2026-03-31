@@ -18,14 +18,14 @@
 
     /* ── Ghost state — always visible pulsing outline ── */
     @keyframes ghost-pulse {
-      0%, 100% { border-color: rgba(99,102,241,0.2); box-shadow: 0 0 0 0 rgba(99,102,241,0); }
-      50%       { border-color: rgba(99,102,241,0.5); box-shadow: 0 0 12px 2px rgba(99,102,241,0.15); }
+      0%, 100% { border-color: rgba(99,102,241,0.3); box-shadow: 0 0 0 0 rgba(99,102,241,0); }
+      50%       { border-color: rgba(99,102,241,0.6); box-shadow: 0 0 14px 3px rgba(99,102,241,0.2); }
     }
 
     #ghost {
       position: fixed;
       inset: 0;
-      border: 1.5px solid rgba(99,102,241,0.25);
+      border: 3px solid rgba(99,102,241,0.35);
       border-radius: 14px;
       animation: ghost-pulse 2.5s ease-in-out infinite;
       pointer-events: none;
@@ -35,23 +35,42 @@
 
     #ghost.hidden { opacity: 0; }
 
+    /* ── Corner resize indicators (ghost state) ── */
+    .resize-corner {
+      position: fixed;
+      width: 16px; height: 16px;
+      border-color: rgba(99,102,241,0.7);
+      border-style: solid;
+      pointer-events: none;
+      transition: opacity 0.3s;
+      opacity: 1;
+    }
+    .resize-corner.tl { top: 4px; left: 4px;  border-width: 3px 0 0 3px; border-radius: 4px 0 0 0; }
+    .resize-corner.tr { top: 4px; right: 4px;  border-width: 3px 3px 0 0; border-radius: 0 4px 0 0; }
+    .resize-corner.bl { bottom: 4px; left: 4px;  border-width: 0 0 3px 3px; border-radius: 0 0 0 4px; }
+    .resize-corner.br { bottom: 4px; right: 4px;  border-width: 0 3px 3px 0; border-radius: 0 0 4px 0; }
+    .resize-corner.hidden { opacity: 0; }
+
     /* ── Drag bar ── */
     #drag-bar {
-      height: 28px;
+      height: 36px;
       width: 100%;
       -webkit-app-region: drag;
       cursor: grab;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 5px;
+      gap: 3px;
       flex-shrink: 0;
-      opacity: 0;
-      transition: opacity 0.2s;
       position: relative;
+      background: rgba(99,102,241,0.12);
+      border-radius: 11px 11px 0 0;
+      border-bottom: 1px solid rgba(99,102,241,0.2);
     }
-    #drag-bar .dot { width: 4px; height: 4px; border-radius: 50%; background: rgba(255,255,255,0.5); }
-    body:hover #drag-bar { opacity: 1; }
+    /* Six-dot grip icon */
+    #drag-bar .grip-row { display: flex; gap: 3px; }
+    #drag-bar .dot { width: 3px; height: 3px; border-radius: 50%; background: rgba(255,255,255,0.4); }
+    #drag-bar:hover .dot { background: rgba(255,255,255,0.7); }
 
     #btn-settings {
       position: absolute;
@@ -158,9 +177,17 @@
   <!-- Always-visible ghost outline -->
   <div id="ghost"></div>
 
+  <!-- Corner resize indicators -->
+  <div class="resize-corner tl" id="rc-tl"></div>
+  <div class="resize-corner tr" id="rc-tr"></div>
+  <div class="resize-corner bl" id="rc-bl"></div>
+  <div class="resize-corner br" id="rc-br"></div>
+
   <div id="drag-bar">
-    <div class="dot"></div><div class="dot"></div><div class="dot"></div>
-    <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+    <div class="grip-row">
+      <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+      <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+    </div>
     <button id="btn-settings" onclick="toggleSettings()" title="Overlay settings">⚙</button>
   </div>
 
@@ -222,11 +249,14 @@
     function setGhostState(ghost) {
       _isGhost = ghost;
       const g = document.getElementById('ghost');
+      const corners = ['rc-tl','rc-tr','rc-bl','rc-br'];
       if (ghost) {
         g.classList.remove('hidden');
+        corners.forEach(id => document.getElementById(id).classList.remove('hidden'));
         ipcRenderer.send('overlay-mouse-leave'); // re-enable click-through
       } else {
         g.classList.add('hidden');
+        corners.forEach(id => document.getElementById(id).classList.add('hidden'));
       }
     }
 
