@@ -22,6 +22,7 @@ swiftc -O \
   -framework CoreMedia \
   -framework AVFAudio \
   -framework AudioToolbox \
+  -framework CoreAudio \
   AudioCapture.swift -o AudioCapture
 
 # Step 2: Update version in package.json
@@ -33,21 +34,13 @@ node -e "
 "
 echo "→ Version set to ${VERSION}"
 
-# Step 3: Build the app + DMG + ZIP
-echo "→ Building Electron app..."
+# Step 3: Build, sign, notarize, and publish to GitHub Releases (single pass)
+echo "→ Building Electron app + publishing to GitHub Releases..."
 export GH_TOKEN=${GH_TOKEN:-$(gh auth token)}
-npx electron-builder --mac
-
-echo ""
-echo "=== Build complete ==="
-echo "  DMG: dist/${APP_NAME}-${VERSION}-arm64.dmg"
-echo "  ZIP: dist/${APP_NAME}-${VERSION}-arm64-mac.zip"
-echo ""
-
-# Step 4: Publish to GitHub Releases
-echo "→ Publishing to GitHub Releases..."
 npx electron-builder --mac --publish always
 
 echo ""
 echo "=== Release v${VERSION} published ==="
+echo "  DMG: dist/${APP_NAME}-${VERSION}-arm64.dmg"
+echo "  ZIP: dist/${APP_NAME}-${VERSION}-arm64-mac.zip"
 echo "All running apps will auto-update on next launch."

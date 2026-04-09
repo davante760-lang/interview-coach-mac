@@ -1,6 +1,7 @@
 import Foundation
 import ScreenCaptureKit
 import AVFAudio
+import CoreAudio
 
 // MARK: - Railway WebSocket
 
@@ -97,8 +98,16 @@ class DeepgramWS {
         task = URLSession.shared.webSocketTask(with: request)
         task?.resume()
         recv()
-        DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            guard let self = self, self.task?.state == .running else { return }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self = self else { return }
+            let state = self.task?.state
+            // Accept .running or any non-terminal state — handshake timing varies per connection
+            guard state != .completed && state != .canceling else {
+                fputs("[Deepgram-\(self.label)] Connection failed (state=\(String(describing: state))) — will retry\n", stderr)
+                self.reconnectAttempts += 1
+                DispatchQueue.global().asyncAfter(deadline: .now() + 2.0) { self.connect() }
+                return
+            }
             self.connected = true
             self.reconnectAttempts = 0
             fputs("[Deepgram-\(self.label)] Connected\n", stderr)
@@ -265,6 +274,11 @@ class MicCapture {
     private var sent = 0
     private var running = false
     private var deviceChangeObserver: NSObjectProtocol?
+    private var coreAudioListenerInstalled = false
+    private var restartInFlight = false
+
+    // Patch C: RMS gate — drop chunks quieter than this (kills residual speaker bleed)
+    private let rmsGateThreshold: Float = 0.005
 
     init(railway: RailwayWS, deepgram: DeepgramWS) {
         self.railway = railway
@@ -293,63 +307,107 @@ class MicCapture {
         }
 
         deepgram.connect()
-        startEngine()
-
-        // Listen for default input device changes — auto-switch mic mid-call
-        deviceChangeObserver = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange,
-            object: engine,
-            queue: nil
-        ) { [weak self] _ in
-            guard let self = self, self.running else { return }
-            fputs("[Mic] Audio device changed — restarting engine\n", stderr)
-            self.restartEngine()
-        }
+        startEngine(retriesLeft: 3)
+        installEngineConfigObserver()
+        installCoreAudioDeviceListener()
     }
 
-    private func startEngine() {
+    private func currentInputDeviceName() -> String {
+        var deviceID = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let status = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &deviceID)
+        guard status == noErr, deviceID != 0 else { return "unknown" }
+
+        var nameAddr = AudioObjectPropertyAddress(
+            mSelector: kAudioObjectPropertyName,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var name: Unmanaged<CFString>?
+        var nameSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        let nstatus = AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &name)
+        guard nstatus == noErr, let cf = name?.takeRetainedValue() else { return "unknown" }
+        return cf as String
+    }
+
+    private func startEngine(retriesLeft: Int) {
         let inputNode = engine.inputNode
+
+        // ── Patch A: Acoustic Echo Cancellation ──────────────────────────────
+        // Subtracts system audio output from mic input. Stops the interviewer's
+        // voice (playing through speakers) from being captured by the mic and
+        // mis-tagged as candidate speech.
+        do {
+            try inputNode.setVoiceProcessingEnabled(true)
+            fputs("[Mic] Voice processing (AEC) enabled\n", stderr)
+        } catch {
+            fputs("[Mic] AEC unavailable: \(error) — continuing without echo cancel\n", stderr)
+        }
+
         let hwFormat = inputNode.outputFormat(forBus: 0)
-        fputs("[Mic] Hardware format: \(hwFormat.sampleRate)Hz, \(hwFormat.channelCount)ch\n", stderr)
+        let deviceName = currentInputDeviceName()
+        fputs("[Mic] Device: \(deviceName) | Format: \(hwFormat.sampleRate)Hz, \(hwFormat.channelCount)ch\n", stderr)
 
         guard hwFormat.sampleRate > 0 else {
-            fputs("[Mic] No input device available — skipping mic capture\n", stderr)
+            if retriesLeft > 0 {
+                fputs("[Mic] Sample rate 0 — retrying in 1.0s (\(retriesLeft) left)\n", stderr)
+                DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                    guard let self = self else { return }
+                    self.engine = AVAudioEngine()
+                    self.startEngine(retriesLeft: retriesLeft - 1)
+                }
+            } else {
+                fputs("[Mic] No input device available after retries — mic capture offline\n", stderr)
+            }
             return
         }
 
-        // Target: 16kHz mono Int16
-        guard let targetFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true) else {
-            fputs("[Mic] Failed to create target format\n", stderr)
-            return
-        }
-
-        // Convert from hardware format to 16kHz mono int16
-        guard let converter = AVAudioConverter(from: hwFormat, to: targetFormat) else {
-            fputs("[Mic] Failed to create audio converter\n", stderr)
-            return
-        }
+        let hwSampleRate = hwFormat.sampleRate
+        let hwChannels = Int(hwFormat.channelCount)
+        let dsRatio = max(1, Int(hwSampleRate / 16000.0))
 
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: hwFormat) { [weak self] buffer, _ in
             guard let self = self else { return }
+            guard let channelData = buffer.floatChannelData else { return }
 
-            let frameCount = AVAudioFrameCount(16000.0 * Double(buffer.frameLength) / hwFormat.sampleRate)
-            guard frameCount > 0,
-                  let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: frameCount) else { return }
+            let frameCount = Int(buffer.frameLength)
 
-            var error: NSError?
-            let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
-                outStatus.pointee = .haveData
-                return buffer
+            // ── Patch C: RMS gate ────────────────────────────────────────────
+            // Compute mean-square energy across the buffer; if it's near silence,
+            // drop the whole buffer. Catches any residual speaker bleed AEC misses.
+            var sumSq: Float = 0
+            var sampleCount: Int = 0
+            for ch in 0..<hwChannels {
+                let ptr = channelData[ch]
+                for f in 0..<frameCount {
+                    let s = ptr[f]
+                    sumSq += s * s
+                    sampleCount += 1
+                }
+            }
+            let rms = sampleCount > 0 ? sqrt(sumSq / Float(sampleCount)) : 0
+            if rms < self.rmsGateThreshold {
+                return  // silence/bleed — don't downsample, don't send
             }
 
-            guard status != .error, error == nil, outputBuffer.frameLength > 0 else { return }
+            var frameIdx = 0
+            while frameIdx < frameCount {
+                var mono: Float = 0
+                for ch in 0..<hwChannels { mono += channelData[ch][frameIdx] }
+                mono /= Float(hwChannels)
 
-            // outputBuffer contains Int16 samples at 16kHz — send directly to Deepgram
-            let byteCount = Int(outputBuffer.frameLength) * 2 // Int16 = 2 bytes
-            guard let int16Data = outputBuffer.int16ChannelData else { return }
-            let data = Data(bytes: int16Data[0], count: byteCount)
+                let clamped = max(-1.0, min(1.0, mono))
+                var val = Int16(clamped < 0 ? clamped * 32768 : clamped * 32767).littleEndian
+                self.accum.append(Data(bytes: &val, count: 2))
 
-            self.accum.append(data)
+                frameIdx += dsRatio
+            }
+
             while self.accum.count >= self.chunkBytes {
                 let chunk = self.accum.prefix(self.chunkBytes)
                 self.accum.removeFirst(self.chunkBytes)
@@ -364,37 +422,77 @@ class MicCapture {
         do {
             try engine.start()
             running = true
-            fputs("[Mic] Engine started\n", stderr)
+            fputs("[Mic] Engine started on \(deviceName)\n", stderr)
         } catch {
-            fputs("[Mic] Failed to start engine: \(error) — skipping mic capture\n", stderr)
+            fputs("[Mic] Failed to start engine: \(error)\n", stderr)
+            if retriesLeft > 0 {
+                DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                    guard let self = self else { return }
+                    self.engine = AVAudioEngine()
+                    self.startEngine(retriesLeft: retriesLeft - 1)
+                }
+            }
+        }
+    }
+
+    private func installEngineConfigObserver() {
+        if let old = deviceChangeObserver {
+            NotificationCenter.default.removeObserver(old)
+        }
+        deviceChangeObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: nil
+        ) { [weak self] _ in
+            guard let self = self, self.running else { return }
+            fputs("[Mic] AVAudioEngine config change — restarting\n", stderr)
+            self.restartEngine()
+        }
+    }
+
+    // ── Patch B: Core Audio device-list listener ─────────────────────────────
+    // AVAudioEngineConfigurationChange misses some plug/unplug events.
+    // Listen directly on Core Audio for default-input changes too.
+    private func installCoreAudioDeviceListener() {
+        guard !coreAudioListenerInstalled else { return }
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let status = AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject),
+            &addr,
+            DispatchQueue.global()
+        ) { [weak self] _, _ in
+            guard let self = self, self.running else { return }
+            fputs("[Mic] Core Audio default-input changed — restarting\n", stderr)
+            self.restartEngine()
+        }
+        if status == noErr {
+            coreAudioListenerInstalled = true
+            fputs("[Mic] Core Audio device listener installed\n", stderr)
+        } else {
+            fputs("[Mic] Failed to install Core Audio listener: \(status)\n", stderr)
         }
     }
 
     private func restartEngine() {
-        // Stop current engine, clear state, restart with new device
+        // Coalesce: device-change and config-change often fire back-to-back
+        guard !restartInFlight else { return }
+        restartInFlight = true
+
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         accum = Data()
 
-        // Small delay to let the OS finish the device switch
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { [weak self] in
+        // ── Patch B: longer settle delay (1.2s) so the OS finishes the switch
+        DispatchQueue.global().asyncAfter(deadline: .now() + 1.2) { [weak self] in
             guard let self = self else { return }
-            // Need a fresh engine — AVAudioEngine can be stale after config change
             self.engine = AVAudioEngine()
-            self.startEngine()
-            // Re-observe the new engine instance
-            if let old = self.deviceChangeObserver {
-                NotificationCenter.default.removeObserver(old)
-            }
-            self.deviceChangeObserver = NotificationCenter.default.addObserver(
-                forName: .AVAudioEngineConfigurationChange,
-                object: self.engine,
-                queue: nil
-            ) { [weak self] _ in
-                guard let self = self, self.running else { return }
-                fputs("[Mic] Audio device changed — restarting engine\n", stderr)
-                self.restartEngine()
-            }
+            self.startEngine(retriesLeft: 3)
+            self.installEngineConfigObserver()
+            self.restartInFlight = false
         }
     }
 
