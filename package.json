@@ -1,6 +1,6 @@
 {
   "name": "interview-coach-desktop",
-  "version": "2.1.14",
+  "version": "2.1.16",
   "description": "Captures system audio via ScreenCaptureKit and streams to Interview Coach",
   "main": "main.js",
   "scripts": {
@@ -15,12 +15,14 @@
     "ws": "^8.19.0"
   },
   "devDependencies": {
+    "@electron/notarize": "^3.1.1",
     "electron": "^41.1.0",
     "electron-builder": "^26.8.1"
   },
   "build": {
     "appId": "com.interviewcoach.desktop",
     "productName": "Interview Coach Audio",
+    "afterSign": "scripts/notarize.js",
     "files": [
       "main.js",
       "renderer.js",
@@ -38,11 +40,14 @@
     ],
     "mac": {
       "category": "public.app-category.productivity",
+      "icon": "build/icon.icns",
       "target": [
         "dmg",
         "zip"
       ],
-      "identity": null,
+      "identity": "736C27FD738A2E1AB02494C9096136C82BD6FB39",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
       "entitlements": "entitlements.mac.plist",
       "entitlementsInherit": "entitlements.mac.plist",
       "extendInfo": {
