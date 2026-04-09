@@ -3,11 +3,44 @@
 <head>
 <meta charset="utf-8">
 <style>
+/* === Design tokens — mirrored from interview-coach web app === */
+:root {
+  --void:         #080B12;
+  --base:         #0D1117;
+  --bg-panel:     #101622;
+  --bg-elevated:  #151E2E;
+  --bg-card:      rgba(20, 28, 44, 0.55);
+  --bg-hover:     rgba(28, 38, 58, 0.65);
+
+  --border:         rgba(255, 255, 255, 0.05);
+  --border-light:   rgba(255, 255, 255, 0.08);
+  --border-visible: rgba(255, 255, 255, 0.12);
+  --border-accent:  rgba(0, 224, 204, 0.28);
+
+  --accent:        #00E0CC;
+  --accent-bright: #5EFFE5;
+  --accent-soft:   rgba(0, 224, 204, 0.10);
+  --green:         #3DDC84;
+  --red:           #FF5C5C;
+  --purple:        #8B7AFF;
+
+  --t1: #EDF2F7;
+  --t2: #CBD5E1;
+  --t3: #8B9BB4;
+  --t4: #5A6A82;
+  --t5: #384152;
+
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+  --radius-sm: 8px;
+  --radius:    10px;
+  --radius-lg: 14px;
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
-  background: #0f172a;
-  color: #e2e8f0;
+  font-family: var(--font);
+  background: var(--void);
+  color: var(--t1);
   padding: 20px;
   -webkit-app-region: drag;
   user-select: none;
@@ -15,86 +48,126 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.01em;
 }
 
 .header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding-top: 8px;
+  gap: 12px;
+  padding-top: 4px;
 }
-.logo  { color: #f43f5e; font-size: 20px; }
-.title { font-size: 15px; font-weight: 700; }
-.subtitle { font-size: 11px; color: #64748b; }
+.logo {
+  color: var(--accent);
+  font-size: 22px;
+  text-shadow: 0 0 20px rgba(0, 224, 204, 0.4);
+}
+.title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--t1);
+  letter-spacing: -0.02em;
+}
+.subtitle {
+  font-size: 11px;
+  color: var(--t4);
+  font-weight: 500;
+}
 
 .status {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 14px;
-  background: #1e293b;
-  border-radius: 10px;
+  padding: 11px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
   font-size: 13px;
+  color: var(--t2);
+  backdrop-filter: blur(12px);
 }
-.dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-.dot-idle { background: #64748b; }
-.dot-live { background: #10b981; animation: pulse 1.5s infinite; }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.dot-idle { background: var(--t4); }
+.dot-live {
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(0, 224, 204, 0.6);
+  animation: pulse 1.5s infinite;
+}
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 
 input.field {
   width: 100%;
-  padding: 9px 12px;
-  background: #1e293b;
-  border: 1px solid #334155;
-  border-radius: 8px;
-  color: #e2e8f0;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  color: var(--t1);
   font-size: 12px;
   font-family: inherit;
   -webkit-app-region: no-drag;
+  transition: border-color .15s;
 }
-input.field:focus { outline: none; border-color: #3b82f6; }
-input.field::placeholder { color: #475569; }
+input.field:focus { outline: none; border-color: var(--border-accent); }
+input.field::placeholder { color: var(--t4); }
 
 .row { display: flex; gap: 8px; }
 .row .field { flex: 1; }
 
 .btn {
   width: 100%;
-  padding: 12px;
+  padding: 13px;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--radius);
   font-family: inherit;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   -webkit-app-region: no-drag;
-  transition: background .15s;
+  transition: all .15s;
+  letter-spacing: -0.01em;
 }
-.btn-start { background: #f43f5e; color: white; }
-.btn-start:hover { background: #e11d48; }
-.btn-stop  { background: #1e293b; color: #ef4444; border: 1px solid #ef4444; }
-.btn-stop:hover { background: rgba(127,29,29,.2); }
+.btn-start {
+  background: var(--accent);
+  color: var(--void);
+  box-shadow: 0 0 24px rgba(0, 224, 204, 0.18);
+}
+.btn-start:hover {
+  background: var(--accent-bright);
+  box-shadow: 0 0 32px rgba(0, 224, 204, 0.3);
+}
+.btn-stop  {
+  background: transparent;
+  color: var(--red);
+  border: 1px solid rgba(255, 92, 92, 0.4);
+}
+.btn-stop:hover {
+  background: rgba(255, 92, 92, 0.08);
+  border-color: var(--red);
+}
 
 /* Stats grid */
 .stats {
-  background: #1e293b;
-  border-radius: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
   padding: 10px 14px;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px 12px;
   font-size: 11px;
+  backdrop-filter: blur(12px);
 }
-.stat-label { color: #475569; }
-.stat-value { color: #94a3b8; font-variant-numeric: tabular-nums; }
+.stat-label { color: var(--t4); }
+.stat-value { color: var(--t3); font-variant-numeric: tabular-nums; }
 
 .error-msg {
-  background: rgba(239,68,68,.1);
-  border: 1px solid rgba(239,68,68,.3);
-  border-radius: 8px;
-  padding: 8px 12px;
+  background: rgba(255, 92, 92, 0.08);
+  border: 1px solid rgba(255, 92, 92, 0.25);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
   font-size: 11px;
-  color: #fca5a5;
+  color: #FCA5A5;
   white-space: pre-wrap;
   line-height: 1.5;
   -webkit-app-region: no-drag;
@@ -104,45 +177,49 @@ input.field::placeholder { color: #475569; }
 .transcripts {
   flex: 1;
   min-height: 80px;
-  background: #1e293b;
-  border-radius: 10px;
-  padding: 10px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  padding: 12px 14px;
   overflow-y: auto;
   font-size: 12px;
   line-height: 1.6;
   -webkit-app-region: no-drag;
   user-select: text;
+  backdrop-filter: blur(12px);
 }
 .transcripts-header {
-  font-size: 11px;
-  color: #475569;
+  font-size: 10px;
+  color: var(--t4);
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
   margin-bottom: 6px;
 }
 .transcript-line {
-  color: #cbd5e1;
+  color: var(--t2);
   margin-bottom: 4px;
   padding: 4px 8px;
   background: rgba(255,255,255,.03);
   border-radius: 6px;
 }
 .transcript-line.candidate {
-  color: #60a5fa;
-  border-left: 2px solid #3b82f6;
+  color: var(--accent);
+  border-left: 2px solid var(--accent);
 }
 .transcript-line.interim {
-  color: #64748b;
+  color: var(--t4);
   font-style: italic;
 }
 .transcript-empty {
-  color: #334155;
+  color: var(--t5);
   font-style: italic;
   font-size: 11px;
 }
 
 .info {
   font-size: 10px;
-  color: #334155;
+  color: var(--t5);
   text-align: center;
   line-height: 1.6;
   flex-shrink: 0;
@@ -153,49 +230,53 @@ input.field::placeholder { color: #475569; }
   display: none;
   align-items: center;
   gap: 10px;
-  padding: 10px 14px;
-  background: rgba(99, 102, 241, 0.12);
-  border: 1px solid rgba(99, 102, 241, 0.3);
-  border-radius: 10px;
+  padding: 11px 14px;
+  background: rgba(139, 122, 255, 0.10);
+  border: 1px solid rgba(139, 122, 255, 0.28);
+  border-radius: var(--radius);
   font-size: 12px;
   flex-shrink: 0;
+  backdrop-filter: blur(12px);
 }
 .meeting-banner-dot {
   width: 7px; height: 7px; border-radius: 50%;
-  background: #6366f1;
+  background: var(--purple);
+  box-shadow: 0 0 8px rgba(139, 122, 255, 0.6);
   flex-shrink: 0;
   animation: pulse 1.5s infinite;
 }
-.meeting-banner-msg { flex: 1; color: #a5b4fc; font-weight: 500; }
+.meeting-banner-msg { flex: 1; color: #C4B8FF; font-weight: 500; }
 .meeting-banner-actions { display: flex; gap: 6px; flex-shrink: 0; -webkit-app-region: no-drag; }
 .meeting-btn-start {
-  background: #6366f1; color: white; border: none; border-radius: 6px;
-  padding: 4px 10px; font-size: 11px; font-weight: 600; cursor: pointer;
+  background: var(--purple); color: white; border: none; border-radius: 6px;
+  padding: 5px 11px; font-size: 11px; font-weight: 600; cursor: pointer;
   font-family: inherit;
 }
-.meeting-btn-start:hover { background: #818cf8; }
+.meeting-btn-start:hover { background: #A294FF; }
 .meeting-btn-dismiss {
-  background: transparent; color: #64748b; border: 1px solid #334155;
-  border-radius: 6px; padding: 4px 8px; font-size: 11px; cursor: pointer;
+  background: transparent; color: var(--t4); border: 1px solid var(--border-visible);
+  border-radius: 6px; padding: 5px 9px; font-size: 11px; cursor: pointer;
   font-family: inherit;
 }
-.meeting-btn-dismiss:hover { color: #94a3b8; }
+.meeting-btn-dismiss:hover { color: var(--t2); }
 
 /* Settings row */
 .settings-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 14px;
-  background: #1e293b;
-  border-radius: 10px;
+  padding: 10px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
   font-size: 12px;
   flex-shrink: 0;
   -webkit-app-region: no-drag;
+  backdrop-filter: blur(12px);
 }
-.settings-label { color: #94a3b8; }
-.settings-hint  { font-size: 10px; color: #475569; margin-top: 1px; }
-.settings-saved { font-size: 10px; color: #6366f1; opacity: 0; transition: opacity 0.3s; margin-left: 8px; }
+.settings-label { color: var(--t2); }
+.settings-hint  { font-size: 10px; color: var(--t4); margin-top: 2px; }
+.settings-saved { font-size: 10px; color: var(--accent); opacity: 0; transition: opacity 0.3s; margin-left: 8px; }
 
 /* Toggle switch */
 .toggle-wrap { display: flex; align-items: center; gap: 8px; }
@@ -206,7 +287,7 @@ input.field::placeholder { color: #475569; }
 .toggle input { opacity: 0; width: 0; height: 0; }
 .toggle-slider {
   position: absolute; inset: 0;
-  background: #334155; border-radius: 20px;
+  background: var(--t5); border-radius: 20px;
   cursor: pointer; transition: background .2s;
 }
 .toggle-slider::before {
@@ -215,7 +296,7 @@ input.field::placeholder { color: #475569; }
   left: 3px; top: 3px;
   background: white; transition: transform .2s;
 }
-.toggle input:checked + .toggle-slider { background: #6366f1; }
+.toggle input:checked + .toggle-slider { background: var(--accent); }
 .toggle input:checked + .toggle-slider::before { transform: translateX(16px); }
 </style>
 </head>
@@ -234,14 +315,10 @@ input.field::placeholder { color: #475569; }
     <span id="status-text">Ready</span>
   </div>
 
-  <input class="field" id="server-url" type="text"
-    value="wss://interview-coach-production-9c63.up.railway.app"
-    placeholder="Server WebSocket URL">
-
-  <div class="row">
-    <input class="field" id="prospect-name"    type="text" placeholder="Prospect name (optional)">
-    <input class="field" id="prospect-company" type="text" placeholder="Company (optional)">
-  </div>
+  <input class="field" id="server-url" type="hidden"
+    value="wss://interview-coach-production-9c63.up.railway.app">
+  <input id="prospect-name" type="hidden" value="">
+  <input id="prospect-company" type="hidden" value="">
 
   <!-- Meeting detection banner — shown automatically when meeting detected -->
   <div class="meeting-banner" id="meeting-banner">
@@ -261,17 +338,14 @@ input.field::placeholder { color: #475569; }
   </button>
 
   <div class="stats" id="stats" style="display:none">
-    <span class="stat-label">Time</span>       <span class="stat-value" id="timer">0:00</span>
-    <span class="stat-label">Audio chunks</span><span class="stat-value" id="chunks">0 chunks</span>
-    <span class="stat-label">Server</span>     <span class="stat-value" id="ws-status">WS: -</span>
-    <span class="stat-label">Format</span>     <span class="stat-value" id="format">-</span>
+    <span class="stat-value" id="timer">0:00</span>
+    <span class="stat-value" id="chunks" style="display:none">0 chunks</span>
+    <span class="stat-value" id="ws-status" style="display:none">WS: -</span>
+    <span class="stat-value" id="format" style="display:none">-</span>
   </div>
 
   <div class="transcripts" id="transcripts" style="display:none">
-    <div class="transcripts-header">Live Transcription</div>
-    <div id="transcript-content">
-      <div class="transcript-empty">Waiting for audio...</div>
-    </div>
+    <div id="transcript-content"></div>
   </div>
 
   <div class="error-msg" id="error-msg" style="display:none"></div>
