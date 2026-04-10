@@ -439,20 +439,22 @@ let _sessionToken = null;  // Short-lived Clerk JWT passed from web app per-sess
 let _sessionUserId = null;
 
 function getServerURL() {
+  const settings = loadSettings();
+
   // Priority 1: Fresh Clerk token from web app (passed via URL scheme or /start endpoint)
   if (_sessionToken && _sessionUserId) {
     return `${_BASE_SERVER_URL}?token=${encodeURIComponent(_sessionToken)}&user_id=${encodeURIComponent(_sessionUserId)}`;
   }
-  // Priority 2: Desktop API key from settings (manual fallback)
-  const settings = loadSettings();
+  // Priority 2: Per-user desktop token (auto-provisioned by web app, never expires)
+  const dt = settings.desktopToken || '';
+  if (dt) {
+    return `${_BASE_SERVER_URL}?desktop_token=${encodeURIComponent(dt)}`;
+  }
+  // Priority 3: Owner desktop API key (admin-only manual fallback)
   const key = settings.desktopApiKey || '';
   const uid = settings.userId || '';
   if (key && uid) {
     return `${_BASE_SERVER_URL}?desktop_key=${encodeURIComponent(key)}&user_id=${encodeURIComponent(uid)}`;
-  }
-  // Priority 3: Stored userId with no key (will fail auth in production)
-  if (uid) {
-    return `${_BASE_SERVER_URL}?user_id=${encodeURIComponent(uid)}`;
   }
   return _BASE_SERVER_URL;
 }
@@ -467,15 +469,18 @@ function storeAuthFromURL(url) {
     const params = new URLSearchParams(url.substring(qIdx));
     const token = params.get('token');
     const userId = params.get('user_id');
+    const desktopToken = params.get('desktop_token');
     if (token) _sessionToken = token;
-    if (userId) {
-      _sessionUserId = userId;
-      // Persist userId to settings so the app remembers the user across restarts
-      const s = loadSettings();
-      s.userId = userId;
-      saveSettings(s);
-    }
-    if (token && userId) console.log('[Auth] Credentials received from web app for user:', userId);
+    if (userId) _sessionUserId = userId;
+
+    // Persist to settings
+    const s = loadSettings();
+    if (userId) s.userId = userId;
+    if (desktopToken) s.desktopToken = desktopToken;
+    if (userId || desktopToken) saveSettings(s);
+
+    if (token && userId) console.log('[Auth] Clerk credentials received for user:', userId);
+    if (desktopToken) console.log('[Auth] Desktop token stored for auto-detect');
   } catch (e) {
     console.warn('[Auth] Failed to parse auth from URL:', e.message);
   }
@@ -484,15 +489,18 @@ function storeAuthFromURL(url) {
 // Store auth credentials from local HTTP /start request body
 function storeAuthFromPayload(payload) {
   if (payload.authToken) _sessionToken = payload.authToken;
-  if (payload.userId) {
-    _sessionUserId = payload.userId;
-    const s = loadSettings();
-    s.userId = payload.userId;
-    saveSettings(s);
-  }
+  if (payload.userId) _sessionUserId = payload.userId;
+
+  // Persist to settings
+  const s = loadSettings();
+  if (payload.userId) s.userId = payload.userId;
+  if (payload.desktopToken) s.desktopToken = payload.desktopToken;
+  if (payload.userId || payload.desktopToken) saveSettings(s);
+
   if (payload.authToken && payload.userId) {
-    console.log('[Auth] Credentials received from web app (HTTP) for user:', payload.userId);
+    console.log('[Auth] Clerk credentials received (HTTP) for user:', payload.userId);
   }
+  if (payload.desktopToken) console.log('[Auth] Desktop token stored for auto-detect');
 }
 
 function startAudioCapture(prospectName, prospectCompany) {
