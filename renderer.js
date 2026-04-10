@@ -31,6 +31,15 @@ window.addEventListener('DOMContentLoaded', async () => {
   const s = await loadSettings();
   const toggle = document.getElementById('auto-start-toggle');
   if (toggle) toggle.checked = !!s.autoStart;
+
+  // Populate auth fields if present
+  const keyInput = document.getElementById('desktop-api-key');
+  const userInput = document.getElementById('desktop-user-id');
+  if (keyInput && s.desktopApiKey) keyInput.value = s.desktopApiKey;
+  if (userInput && s.userId) userInput.value = s.userId;
+
+  // Show auth status
+  updateAuthStatus(s);
 });
 
 async function onAutoStartToggle() {
@@ -45,6 +54,34 @@ function showSettingsSaved() {
   if (!el) return;
   el.style.opacity = '1';
   setTimeout(() => { el.style.opacity = '0'; }, 1200);
+}
+
+// ── Auth Settings (Desktop API Key + User ID) ────────────────────────────────
+
+async function saveAuthSettings() {
+  const keyInput = document.getElementById('desktop-api-key');
+  const userInput = document.getElementById('desktop-user-id');
+  const key = keyInput ? keyInput.value.trim() : '';
+  const uid = userInput ? userInput.value.trim() : '';
+
+  const s = await loadSettings();
+  s.desktopApiKey = key;
+  s.userId = uid;
+  await saveSettings(s);
+  updateAuthStatus(s);
+  showSettingsSaved();
+}
+
+function updateAuthStatus(s) {
+  const statusEl = document.getElementById('auth-status');
+  if (!statusEl) return;
+  if (s.desktopApiKey && s.userId) {
+    statusEl.textContent = 'Authenticated';
+    statusEl.style.color = '#4ade80';
+  } else {
+    statusEl.textContent = 'Not configured — calls may fail';
+    statusEl.style.color = '#f87171';
+  }
 }
 
 // ── Meeting Detection Events from Main Process ────────────────────────────────

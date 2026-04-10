@@ -427,8 +427,20 @@ app.on('before-quit', () => { app.isQuitting = true; stopAudioProcess(); });
 
 // ── Shared capture logic (used by IPC + local HTTP server) ──────────────────
 
-const SERVER_URL = 'wss://interview-coach-production-9c63.up.railway.app';
+const _BASE_SERVER_URL = 'wss://interview-coach-production-9c63.up.railway.app';
 const DG_KEY     = '54d546fe79b59f0f372e78e6cc3e77673649b611';
+
+// Desktop API key + user ID for authenticated WS connections
+// Set these in userData/settings.json: { "desktopApiKey": "...", "userId": "user_xxx" }
+function getServerURL() {
+  const settings = loadSettings();
+  const key = settings.desktopApiKey || '';
+  const uid = settings.userId || '';
+  if (key && uid) {
+    return `${_BASE_SERVER_URL}?desktop_key=${encodeURIComponent(key)}&user_id=${encodeURIComponent(uid)}`;
+  }
+  return _BASE_SERVER_URL;
+}
 
 function startAudioCapture(prospectName, prospectCompany) {
   if (audioProcess) return Promise.resolve({ ok: true, already: true });
@@ -437,6 +449,7 @@ function startAudioCapture(prospectName, prospectCompany) {
   // Ensure binary is executable (may lose permissions after install/xattr)
   try { fs.chmodSync(BINARY_PATH, 0o755); } catch (e) { console.warn('[Main] chmod failed:', e.message); }
 
+  const SERVER_URL = getServerURL();
   audioProcess = spawn(BINARY_PATH, [SERVER_URL, DG_KEY, prospectName || '', prospectCompany || ''], {
     stdio: ['pipe', 'pipe', 'pipe']
   });
@@ -530,17 +543,12 @@ function startLocalServer() {
     }
 
     if (req.method === 'POST' && req.url === '/overlay/coaching') {
-      let body = '';
-      req.on('data', c => body += c);
+      // DISABLED per user request — overlay no longer auto-shows on coaching events.
+      // Drain the body and ack without showing the window.
+      req.on('data', () => {});
       req.on('end', () => {
-        try {
-          const data = JSON.parse(body || '{}');
-          if (!overlayWindow) createOverlayWindow();
-          overlayWindow.show();
-          overlayWindow.webContents.send('overlay-coaching', data);
-        } catch (e) {}
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true }));
+        res.end(JSON.stringify({ ok: true, suppressed: true }));
       });
       return;
     }
