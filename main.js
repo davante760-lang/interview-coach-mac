@@ -580,10 +580,20 @@ function startLocalServer() {
     if (req.method === 'POST' && req.url === '/start') {
       let body = '';
       req.on('data', c => body += c);
-      req.on('end', () => {
+      req.on('end', async () => {
         const data = JSON.parse(body || '{}');
+        const hadAuth = !!_sessionToken;
         // Store auth credentials from web app (Clerk token + userId)
         storeAuthFromPayload(data);
+        const hasAuthNow = !!_sessionToken;
+
+        // If Swift is already running but WITHOUT auth, restart it with credentials
+        if (audioProcess && !hadAuth && hasAuthNow) {
+          console.log('[HTTP] Restarting capture with fresh auth credentials');
+          stopAudioProcess();
+          await new Promise(r => setTimeout(r, 1500));
+        }
+
         // Route through renderer so it updates its UI state (same path as meeting auto-start)
         mainWindow?.show();
         mainWindow?.focus();
