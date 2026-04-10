@@ -442,6 +442,8 @@ class MicCapture {
                 let chunk = self.accum.prefix(self.chunkBytes)
                 self.accum.removeFirst(self.chunkBytes)
                 self.deepgram.sendAudio(Data(chunk))
+                // Also send mic PCM to Railway for server-side recording
+                self.railway.sendBinary(Data(chunk))
                 self.sent += 1
                 if self.sent == 1 || self.sent == 10 || self.sent % 100 == 0 {
                     fputs("[Audio-Mic] \(self.sent) chunks sent\n", stderr)
