@@ -75,12 +75,12 @@ async function saveAuthSettings() {
 function updateAuthStatus(s) {
   const statusEl = document.getElementById('auth-status');
   if (!statusEl) return;
-  if (s.desktopApiKey && s.userId) {
-    statusEl.textContent = 'Authenticated';
+  if (s.userId) {
+    statusEl.textContent = s.desktopApiKey ? 'Authenticated' : 'User linked';
     statusEl.style.color = '#4ade80';
   } else {
-    statusEl.textContent = 'Not configured — calls may fail';
-    statusEl.style.color = '#f87171';
+    statusEl.textContent = 'Start a call from the web app to connect';
+    statusEl.style.color = '#94a3b8';
   }
 }
 

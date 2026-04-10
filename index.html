@@ -373,21 +373,25 @@ input.field::placeholder { color: var(--t4); }
     </div>
   </div>
 
-  <!-- Auth settings -->
-  <div class="settings-row" style="flex-direction:column;align-items:stretch;gap:8px;">
+  <!-- Auth status -->
+  <div class="settings-row" style="flex-direction:column;align-items:stretch;gap:6px;">
     <div style="display:flex;justify-content:space-between;align-items:center;">
-      <div class="settings-label">Server Authentication</div>
+      <div class="settings-label">Account</div>
       <span id="auth-status" style="font-size:10px;font-weight:600;"></span>
     </div>
-    <div style="display:flex;gap:8px;">
-      <input type="password" id="desktop-api-key" placeholder="Desktop API Key"
-        style="flex:1;background:var(--bg-elevated);border:1px solid var(--border-visible);border-radius:6px;padding:6px 10px;font-size:11px;color:var(--t2);font-family:var(--font);outline:none;">
-      <input type="text" id="desktop-user-id" placeholder="User ID (user_xxx)"
-        style="flex:1;background:var(--bg-elevated);border:1px solid var(--border-visible);border-radius:6px;padding:6px 10px;font-size:11px;color:var(--t2);font-family:var(--font);outline:none;">
-      <button onclick="saveAuthSettings()"
-        style="background:var(--accent);color:#000;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer;font-family:var(--font);white-space:nowrap;">Save</button>
-    </div>
-    <div class="settings-hint">Required for call recording. Find your User ID in the web app's Account settings.</div>
+    <div class="settings-hint">Automatically linked when you start a call from the web app.</div>
+    <!-- Advanced: manual key config (collapsed by default) -->
+    <details style="margin-top:4px;">
+      <summary style="font-size:10px;color:var(--t4);cursor:pointer;user-select:none;">Advanced settings</summary>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <input type="password" id="desktop-api-key" placeholder="Desktop API Key"
+          style="flex:1;background:var(--bg-elevated);border:1px solid var(--border-visible);border-radius:6px;padding:6px 10px;font-size:11px;color:var(--t2);font-family:var(--font);outline:none;">
+        <input type="text" id="desktop-user-id" placeholder="User ID (user_xxx)"
+          style="flex:1;background:var(--bg-elevated);border:1px solid var(--border-visible);border-radius:6px;padding:6px 10px;font-size:11px;color:var(--t2);font-family:var(--font);outline:none;">
+        <button onclick="saveAuthSettings()"
+          style="background:var(--accent);color:#000;border:none;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer;font-family:var(--font);white-space:nowrap;">Save</button>
+      </div>
+    </details>
   </div>
 
   <div class="info">

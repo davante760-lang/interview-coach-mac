@@ -375,6 +375,8 @@ app.on('open-url', (event, url) => {
   event.preventDefault();
   console.log('[DeepLink] Received:', url);
   if (url.startsWith('interviewcoach://start')) {
+    // Extract auth params from URL: interviewcoach://start?token=...&user_id=...
+    storeAuthFromURL(url);
     mainWindow?.show();
     // Small delay to let the app surface before starting capture
     setTimeout(() => {
@@ -407,6 +409,7 @@ app.whenReady().then(async () => {
   const coldLaunchUrl = process.argv.find(a => a.startsWith('interviewcoach://'));
   if (coldLaunchUrl) {
     console.log('[DeepLink] Cold launch via URL scheme:', coldLaunchUrl);
+    storeAuthFromURL(coldLaunchUrl);
     setTimeout(() => {
       startAudioCapture('', '').then(() => {
         console.log('[DeepLink] Audio capture started (cold launch)');
@@ -430,16 +433,66 @@ app.on('before-quit', () => { app.isQuitting = true; stopAudioProcess(); });
 const _BASE_SERVER_URL = 'wss://interview-coach-production-9c63.up.railway.app';
 const DG_KEY     = '54d546fe79b59f0f372e78e6cc3e77673649b611';
 
-// Desktop API key + user ID for authenticated WS connections
-// Set these in userData/settings.json: { "desktopApiKey": "...", "userId": "user_xxx" }
+// Auth credentials — stored in settings.json, auto-provisioned by web app
+// Priority: Clerk session token (from web app launch) > Desktop API key (manual fallback)
+let _sessionToken = null;  // Short-lived Clerk JWT passed from web app per-session
+let _sessionUserId = null;
+
 function getServerURL() {
+  // Priority 1: Fresh Clerk token from web app (passed via URL scheme or /start endpoint)
+  if (_sessionToken && _sessionUserId) {
+    return `${_BASE_SERVER_URL}?token=${encodeURIComponent(_sessionToken)}&user_id=${encodeURIComponent(_sessionUserId)}`;
+  }
+  // Priority 2: Desktop API key from settings (manual fallback)
   const settings = loadSettings();
   const key = settings.desktopApiKey || '';
   const uid = settings.userId || '';
   if (key && uid) {
     return `${_BASE_SERVER_URL}?desktop_key=${encodeURIComponent(key)}&user_id=${encodeURIComponent(uid)}`;
   }
+  // Priority 3: Stored userId with no key (will fail auth in production)
+  if (uid) {
+    return `${_BASE_SERVER_URL}?user_id=${encodeURIComponent(uid)}`;
+  }
   return _BASE_SERVER_URL;
+}
+
+// Extract and store auth credentials from a deep link URL
+// e.g. interviewcoach://start?token=eyJ...&user_id=user_xxx
+function storeAuthFromURL(url) {
+  try {
+    // URL class can't parse custom schemes — extract query string manually
+    const qIdx = url.indexOf('?');
+    if (qIdx === -1) return;
+    const params = new URLSearchParams(url.substring(qIdx));
+    const token = params.get('token');
+    const userId = params.get('user_id');
+    if (token) _sessionToken = token;
+    if (userId) {
+      _sessionUserId = userId;
+      // Persist userId to settings so the app remembers the user across restarts
+      const s = loadSettings();
+      s.userId = userId;
+      saveSettings(s);
+    }
+    if (token && userId) console.log('[Auth] Credentials received from web app for user:', userId);
+  } catch (e) {
+    console.warn('[Auth] Failed to parse auth from URL:', e.message);
+  }
+}
+
+// Store auth credentials from local HTTP /start request body
+function storeAuthFromPayload(payload) {
+  if (payload.authToken) _sessionToken = payload.authToken;
+  if (payload.userId) {
+    _sessionUserId = payload.userId;
+    const s = loadSettings();
+    s.userId = payload.userId;
+    saveSettings(s);
+  }
+  if (payload.authToken && payload.userId) {
+    console.log('[Auth] Credentials received from web app (HTTP) for user:', payload.userId);
+  }
 }
 
 function startAudioCapture(prospectName, prospectCompany) {
@@ -521,6 +574,8 @@ function startLocalServer() {
       req.on('data', c => body += c);
       req.on('end', () => {
         const data = JSON.parse(body || '{}');
+        // Store auth credentials from web app (Clerk token + userId)
+        storeAuthFromPayload(data);
         // Route through renderer so it updates its UI state (same path as meeting auto-start)
         mainWindow?.show();
         mainWindow?.focus();
