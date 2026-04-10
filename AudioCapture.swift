@@ -41,6 +41,11 @@ class RailwayWS {
         }
     }
 
+    func sendBinary(_ data: Data) {
+        guard connected else { return }
+        task?.send(.data(data)) { _ in }
+    }
+
     func close() {
         intentionallyClosed = true
         connected = false
@@ -91,7 +96,7 @@ class DeepgramWS {
     }
 
     func connect() {
-        let urlStr = "wss://api.deepgram.com/v1/listen?model=nova-2&language=en&punctuate=true&interim_results=true&utterance_end_ms=1000&encoding=linear16&sample_rate=\(sampleRate)&channels=1"
+        let urlStr = "wss://api.deepgram.com/v1/listen?model=nova-2&language=en&punctuate=true&interim_results=true&endpointing=300&utterance_end_ms=1000&encoding=linear16&sample_rate=\(sampleRate)&channels=1"
         guard let url = URL(string: urlStr) else { return }
         var request = URLRequest(url: url)
         request.setValue("Token \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -254,6 +259,8 @@ class AudioDelegate: NSObject, SCStreamOutput, SCStreamDelegate {
             let chunk = accum.prefix(chunkBytes)
             accum.removeFirst(chunkBytes)
             deepgram.sendAudio(Data(chunk))
+            // Also send raw PCM to Railway for server-side recording
+            railway.sendBinary(Data(chunk))
             sent += 1
             if sent == 1 || sent == 10 || sent % 100 == 0 {
                 fputs("[Audio-System] \(sent) chunks sent\n", stderr)
@@ -278,7 +285,8 @@ class MicCapture {
     private var restartInFlight = false
 
     // Patch C: RMS gate — drop chunks quieter than this (kills residual speaker bleed)
-    private let rmsGateThreshold: Float = 0.005
+    // DISABLED: set to 0 so nothing is gated. Was cutting candidate mic entirely.
+    private let rmsGateThreshold: Float = 0.0
 
     init(railway: RailwayWS, deepgram: DeepgramWS) {
         self.railway = railway
@@ -339,15 +347,15 @@ class MicCapture {
         let inputNode = engine.inputNode
 
         // ── Patch A: Acoustic Echo Cancellation ──────────────────────────────
-        // Subtracts system audio output from mic input. Stops the interviewer's
-        // voice (playing through speakers) from being captured by the mic and
-        // mis-tagged as candidate speech.
-        do {
-            try inputNode.setVoiceProcessingEnabled(true)
-            fputs("[Mic] Voice processing (AEC) enabled\n", stderr)
-        } catch {
-            fputs("[Mic] AEC unavailable: \(error) — continuing without echo cancel\n", stderr)
-        }
+        // DISABLED: Apple voice processing was attenuating candidate voice when
+        // speaker was not close to mic, causing full dropouts. Leave raw.
+        // do {
+        //     try inputNode.setVoiceProcessingEnabled(true)
+        //     fputs("[Mic] Voice processing (AEC) enabled\n", stderr)
+        // } catch {
+        //     fputs("[Mic] AEC unavailable: \(error) — continuing without echo cancel\n", stderr)
+        // }
+        fputs("[Mic] AEC disabled (raw mic input)\n", stderr)
 
         let hwFormat = inputNode.outputFormat(forBus: 0)
         let deviceName = currentInputDeviceName()
@@ -367,46 +375,68 @@ class MicCapture {
             return
         }
 
-        let hwSampleRate = hwFormat.sampleRate
-        let hwChannels = Int(hwFormat.channelCount)
-        let dsRatio = max(1, Int(hwSampleRate / 16000.0))
+        // Proper resampling to 16 kHz mono int16 using AVAudioConverter.
+        // Previous code used integer division which broke at non-integer ratios
+        // (e.g. AirPods Max at 24 kHz → Int(24000/16000)=1 → no downsample → garbled).
+        guard let targetFormat = AVAudioFormat(commonFormat: .pcmFormatInt16,
+                                               sampleRate: 16000,
+                                               channels: 1,
+                                               interleaved: true) else {
+            fputs("[Mic] Failed to create 16k target format\n", stderr)
+            return
+        }
+        guard let converter = AVAudioConverter(from: hwFormat, to: targetFormat) else {
+            fputs("[Mic] Failed to create AVAudioConverter \(hwFormat) → 16k mono\n", stderr)
+            return
+        }
+        fputs("[Mic] Resampler: \(hwFormat.sampleRate)Hz \(hwFormat.channelCount)ch → 16000Hz 1ch\n", stderr)
 
+        var tapCallCount = 0
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: hwFormat) { [weak self] buffer, _ in
             guard let self = self else { return }
-            guard let channelData = buffer.floatChannelData else { return }
-
-            let frameCount = Int(buffer.frameLength)
-
-            // ── Patch C: RMS gate ────────────────────────────────────────────
-            // Compute mean-square energy across the buffer; if it's near silence,
-            // drop the whole buffer. Catches any residual speaker bleed AEC misses.
-            var sumSq: Float = 0
-            var sampleCount: Int = 0
-            for ch in 0..<hwChannels {
-                let ptr = channelData[ch]
-                for f in 0..<frameCount {
-                    let s = ptr[f]
-                    sumSq += s * s
-                    sampleCount += 1
-                }
-            }
-            let rms = sampleCount > 0 ? sqrt(sumSq / Float(sampleCount)) : 0
-            if rms < self.rmsGateThreshold {
-                return  // silence/bleed — don't downsample, don't send
+            tapCallCount += 1
+            if tapCallCount <= 3 || tapCallCount % 50 == 0 {
+                fputs("[Mic] tap#\(tapCallCount) frames=\(buffer.frameLength)\n", stderr)
             }
 
-            var frameIdx = 0
-            while frameIdx < frameCount {
-                var mono: Float = 0
-                for ch in 0..<hwChannels { mono += channelData[ch][frameIdx] }
-                mono /= Float(hwChannels)
-
-                let clamped = max(-1.0, min(1.0, mono))
-                var val = Int16(clamped < 0 ? clamped * 32768 : clamped * 32767).littleEndian
-                self.accum.append(Data(bytes: &val, count: 2))
-
-                frameIdx += dsRatio
+            // Compute output capacity proportional to input frames.
+            let ratio = targetFormat.sampleRate / hwFormat.sampleRate
+            let outCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 2048
+            guard let outBuf = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outCapacity) else {
+                fputs("[Mic] outBuf alloc failed\n", stderr)
+                return
             }
+
+            var supplied = false
+            var err: NSError?
+            let status = converter.convert(to: outBuf, error: &err) { _, inputStatus in
+                if supplied { inputStatus.pointee = .noDataNow; return nil }
+                supplied = true
+                inputStatus.pointee = .haveData
+                return buffer
+            }
+            if let e = err {
+                fputs("[Mic] convert error: \(e)\n", stderr)
+                return
+            }
+            if status == .error {
+                fputs("[Mic] convert status=.error\n", stderr)
+                return
+            }
+            guard let int16ptr = outBuf.int16ChannelData?[0] else {
+                fputs("[Mic] no int16 channel data\n", stderr)
+                return
+            }
+            let n = Int(outBuf.frameLength)
+            if tapCallCount <= 3 {
+                fputs("[Mic] tap#\(tapCallCount) converted outFrames=\(n)\n", stderr)
+            }
+            if n == 0 {
+                return
+            }
+            let byteCount = n * 2
+            let data = Data(bytes: UnsafeRawPointer(int16ptr), count: byteCount)
+            self.accum.append(data)
 
             while self.accum.count >= self.chunkBytes {
                 let chunk = self.accum.prefix(self.chunkBytes)
@@ -436,45 +466,17 @@ class MicCapture {
     }
 
     private func installEngineConfigObserver() {
-        if let old = deviceChangeObserver {
-            NotificationCenter.default.removeObserver(old)
-        }
-        deviceChangeObserver = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange,
-            object: engine,
-            queue: nil
-        ) { [weak self] _ in
-            guard let self = self, self.running else { return }
-            fputs("[Mic] AVAudioEngine config change — restarting\n", stderr)
-            self.restartEngine()
-        }
+        // DISABLED: ScreenCaptureKit system-audio start fires a config change
+        // shortly after launch, which triggered a restart that killed mic capture.
+        // Leave the mic engine alone; it survives ScreenCaptureKit just fine.
+        fputs("[Mic] Config-change observer disabled\n", stderr)
     }
 
     // ── Patch B: Core Audio device-list listener ─────────────────────────────
-    // AVAudioEngineConfigurationChange misses some plug/unplug events.
-    // Listen directly on Core Audio for default-input changes too.
+    // DISABLED: was firing during SCStream startup and triggering a mic restart
+    // that killed candidate capture after ~5s.
     private func installCoreAudioDeviceListener() {
-        guard !coreAudioListenerInstalled else { return }
-        var addr = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        let status = AudioObjectAddPropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject),
-            &addr,
-            DispatchQueue.global()
-        ) { [weak self] _, _ in
-            guard let self = self, self.running else { return }
-            fputs("[Mic] Core Audio default-input changed — restarting\n", stderr)
-            self.restartEngine()
-        }
-        if status == noErr {
-            coreAudioListenerInstalled = true
-            fputs("[Mic] Core Audio device listener installed\n", stderr)
-        } else {
-            fputs("[Mic] Failed to install Core Audio listener: \(status)\n", stderr)
-        }
+        fputs("[Mic] Core Audio device listener disabled\n", stderr)
     }
 
     private func restartEngine() {
@@ -546,17 +548,16 @@ func run(_ serverURL: String, _ dgKey: String, _ name: String, _ company: String
     railway.connect()
     dgSystem.connect()
 
-    // Start mic capture (separate Deepgram session, sends desktop_candidate_transcript)
-    let micCapture = MicCapture(railway: railway, deepgram: dgMic)
-    micCapture.start()
-
-    // Start system audio capture via ScreenCaptureKit
+    // Start system audio capture via ScreenCaptureKit FIRST so the audio
+    // subsystem finishes reconfiguring before we install the mic tap.
     let d = AudioDelegate(railway: railway, deepgram: dgSystem)
     var stream: SCStream? = nil
+    let micCapture = MicCapture(railway: railway, deepgram: dgMic)
     do {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
         guard let display = content.displays.first else {
-            fputs("[SC] No display found — system audio unavailable, mic still running\n", stderr)
+            fputs("[SC] No display found — system audio unavailable, starting mic only\n", stderr)
+            micCapture.start()
             print("READY"); fflush(stdout)
             while let line = readLine(strippingNewline: true), line != "STOP" {}
             railway.sendText("{\"type\":\"end_call\"}")
@@ -580,8 +581,14 @@ func run(_ serverURL: String, _ dgKey: String, _ name: String, _ company: String
         try await stream!.startCapture()
         fputs("[SC] capture started\n", stderr)
     } catch {
-        fputs("[SC] Screen capture failed: \(error) — mic capture still running\n", stderr)
+        fputs("[SC] Screen capture failed: \(error) — continuing with mic only\n", stderr)
     }
+
+    // Give the audio subsystem ~1.5s to finish reconfiguring after SCStream
+    // comes up, THEN install the mic tap.
+    try await Task.sleep(nanoseconds: 1_500_000_000)
+    micCapture.start()
+
     print("READY"); fflush(stdout)
 
     while let line = readLine(strippingNewline: true), line != "STOP" {}
