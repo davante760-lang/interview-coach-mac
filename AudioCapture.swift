@@ -259,8 +259,10 @@ class AudioDelegate: NSObject, SCStreamOutput, SCStreamDelegate {
             let chunk = accum.prefix(chunkBytes)
             accum.removeFirst(chunkBytes)
             deepgram.sendAudio(Data(chunk))
-            // Also send raw PCM to Railway for server-side recording
-            railway.sendBinary(Data(chunk))
+            // Tag system audio with 0x01 prefix for server-side recording
+            var tagged = Data([0x01])
+            tagged.append(chunk)
+            railway.sendBinary(tagged)
             sent += 1
             if sent == 1 || sent == 10 || sent % 100 == 0 {
                 fputs("[Audio-System] \(sent) chunks sent\n", stderr)
@@ -442,8 +444,10 @@ class MicCapture {
                 let chunk = self.accum.prefix(self.chunkBytes)
                 self.accum.removeFirst(self.chunkBytes)
                 self.deepgram.sendAudio(Data(chunk))
-                // Also send mic PCM to Railway for server-side recording
-                self.railway.sendBinary(Data(chunk))
+                // Tag mic audio with 0x02 prefix for server-side recording
+                var tagged = Data([0x02])
+                tagged.append(chunk)
+                self.railway.sendBinary(tagged)
                 self.sent += 1
                 if self.sent == 1 || self.sent == 10 || self.sent % 100 == 0 {
                     fputs("[Audio-Mic] \(self.sent) chunks sent\n", stderr)
