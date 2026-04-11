@@ -43,7 +43,12 @@ class RailwayWS {
 
     func sendBinary(_ data: Data) {
         guard connected else { return }
-        task?.send(.data(data)) { _ in }
+        task?.send(.data(data)) { [weak self] err in
+            if let err = err {
+                fputs("[Railway] binary send error: \(err)\n", stderr)
+                self?.handleDisconnect()
+            }
+        }
     }
 
     func close() {
@@ -63,11 +68,28 @@ class RailwayWS {
         }
     }
 
+    private func sendPong() {
+        task?.sendPing { [weak self] err in
+            if let err = err {
+                fputs("[Railway] pong error: \(err)\n", stderr)
+                self?.handleDisconnect()
+            }
+        }
+    }
+
     private func recv() {
         task?.receive { [weak self] r in
             switch r {
             case .success(let m):
-                if case .string(let s) = m { self?.onMsg?(s) }
+                switch m {
+                case .string(let s):
+                    self?.onMsg?(s)
+                case .data:
+                    // Server ping or binary — respond with pong
+                    self?.sendPong()
+                @unknown default:
+                    break
+                }
                 self?.recv()
             case .failure:
                 fputs("[Railway] WS closed\n", stderr)

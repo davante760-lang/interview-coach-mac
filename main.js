@@ -587,7 +587,15 @@ function startLocalServer() {
         storeAuthFromPayload(data);
         const hasAuthNow = !!_sessionToken;
 
-        // If Swift is already running but WITHOUT auth, restart it with credentials
+        // If Swift is already running WITH auth, just ack — don't restart
+        if (audioProcess && hadAuth) {
+          console.log('[HTTP] Capture already running with auth — skipping restart');
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, already: true }));
+          return;
+        }
+
+        // If Swift is running but WITHOUT auth, restart it with credentials
         if (audioProcess && !hadAuth && hasAuthNow) {
           console.log('[HTTP] Restarting capture with fresh auth credentials');
           stopAudioProcess();
