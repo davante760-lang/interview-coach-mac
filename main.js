@@ -124,12 +124,12 @@ function startMeetingDetection() {
         // Auto-start: tell renderer to kick off capture
         console.log('[Meeting] Auto-starting capture');
         _meetingStartedCapture = true;
-        mainWindow?.webContents.send('meeting-auto-start');
+        try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('meeting-auto-start'); } catch (_) {}
         _showMeetingNotification(true);
       } else if (!audioProcess) {
         // Manual: prompt user
         console.log('[Meeting] Prompting user to start capture');
-        mainWindow?.webContents.send('meeting-detected');
+        try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('meeting-detected'); } catch (_) {}
         _showMeetingNotification(false);
       }
 
@@ -145,7 +145,7 @@ function startMeetingDetection() {
               console.log('[Meeting] Meeting ended');
               if (_meetingStartedCapture && audioProcess) {
                 _meetingStartedCapture = false;
-                mainWindow?.webContents.send('meeting-ended');
+                try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('meeting-ended'); } catch (_) {}
               }
             }
           });
@@ -192,9 +192,7 @@ autoUpdater.on('checking-for-update', () => {
 
 autoUpdater.on('update-available', (info) => {
   console.log('[Updater] Update available:', info.version);
-  if (mainWindow) {
-    mainWindow.webContents.send('update-status', 'Downloading update v' + info.version + '...');
-  }
+  try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('update-status', 'Downloading update v' + info.version + '...'); } catch (_) {}
 });
 
 autoUpdater.on('update-not-available', () => {
@@ -207,9 +205,7 @@ autoUpdater.on('download-progress', (progress) => {
 
 autoUpdater.on('update-downloaded', (info) => {
   console.log('[Updater] Update downloaded:', info.version);
-  if (mainWindow) {
-    mainWindow.webContents.send('update-downloaded', info.version);
-  }
+  try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('update-downloaded', info.version); } catch (_) {}
 });
 
 autoUpdater.on('error', (err) => {
@@ -540,12 +536,14 @@ function startAudioCapture(prospectName, prospectCompany) {
   audioProcess.stderr.on('data', (data) => {
     const line = data.toString().trim();
     console.log('[Swift]', line);
-    mainWindow?.webContents.send('audio-log', line);
+    try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('audio-log', line); } catch (_) {}
   });
 
   audioProcess.stdout.on('data', (data) => {
     data.toString().split('\n').forEach(l => {
-      if (l.trim() === 'READY') mainWindow?.webContents.send('audio-log', 'READY');
+      if (l.trim() === 'READY') {
+        try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('audio-log', 'READY'); } catch (_) {}
+      }
     });
   });
 
@@ -553,13 +551,13 @@ function startAudioCapture(prospectName, prospectCompany) {
     console.log('[Main] Swift exited:', code, signal);
     audioProcess = null;
     updateTrayMenu(false);
-    mainWindow?.webContents.send('audio-stopped', { code, signal });
+    try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('audio-stopped', { code, signal }); } catch (_) {}
   });
 
   audioProcess.on('error', (err) => {
     console.error('[Main] Spawn error:', err.message);
     audioProcess = null;
-    mainWindow?.webContents.send('audio-stopped', { code: -1 });
+    try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('audio-stopped', { code: -1 }); } catch (_) {}
   });
 
   updateTrayMenu(true);
@@ -627,10 +625,10 @@ function startLocalServer() {
         // Route through renderer so it updates its UI state (same path as meeting auto-start)
         mainWindow?.show();
         mainWindow?.focus();
-        mainWindow?.webContents.send('web-start-capture', {
+        try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('web-start-capture', {
           prospectName: data.prospectName || '',
           prospectCompany: data.prospectCompany || ''
-        });
+        }); } catch (_) {}
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
       });
@@ -639,7 +637,7 @@ function startLocalServer() {
 
     if (req.method === 'POST' && req.url === '/stop') {
       stopAudioProcess();
-      mainWindow?.webContents.send('web-stop-capture');
+      try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('web-stop-capture'); } catch (_) {}
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
       return;
