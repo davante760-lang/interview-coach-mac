@@ -108,6 +108,8 @@ class DeepgramWS {
     let label: String
     var connected = false
     var onTranscript: ((String, Bool) -> Void)?
+    // Phase 2: forward ALL Deepgram event types (SpeechStarted, UtteranceEnd, etc.)
+    var onEvent: (([String: Any]) -> Void)?
     private var keepaliveTimer: DispatchSourceTimer?
     private var reconnectAttempts = 0
 
@@ -174,13 +176,20 @@ class DeepgramWS {
                 if case .string(let s) = msg {
                     if let data = s.data(using: .utf8),
                        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       let type_ = json["type"] as? String, type_ == "Results",
-                       let channel = json["channel"] as? [String: Any],
-                       let alts = channel["alternatives"] as? [[String: Any]],
-                       let transcript = alts.first?["transcript"] as? String,
-                       !transcript.isEmpty {
-                        let isFinal = json["is_final"] as? Bool ?? false
-                        self?.onTranscript?(transcript, isFinal)
+                       let type_ = json["type"] as? String {
+
+                        // Forward ALL event types to onEvent handler (Phase 2)
+                        self?.onEvent?(json)
+
+                        // Backward-compatible: extract transcript from Results
+                        if type_ == "Results",
+                           let channel = json["channel"] as? [String: Any],
+                           let alts = channel["alternatives"] as? [[String: Any]],
+                           let transcript = alts.first?["transcript"] as? String,
+                           !transcript.isEmpty {
+                            let isFinal = json["is_final"] as? Bool ?? false
+                            self?.onTranscript?(transcript, isFinal)
+                        }
                     }
                 }
                 self?.recv()
@@ -318,23 +327,44 @@ class MicCapture {
     }
 
     func start() {
-        // Set up Deepgram transcript handler — sends as desktop_candidate_transcript
+        // Set up Deepgram transcript handler — sends ALL transcripts (interim + final)
+        // to the server. Previously only finals were sent, which caused the server's
+        // silence timer to fire during active speech (finals can be 3-7s apart).
+        // Interims arrive every ~200-500ms during speech and keep timers alive.
         deepgram.onTranscript = { [weak self] text, isFinal in
             guard let self = self else { return }
-            if isFinal {
-                fputs("[Mic-Transcript] \(text)\n", stderr)
+            fputs("[Mic-\(isFinal ? "Transcript" : "Interim")] \(text)\n", stderr)
+            let msg: [String: Any] = [
+                "type": "desktop_candidate_transcript",
+                "text": text,
+                "isFinal": isFinal,
+                "speaker": "You"
+            ]
+            if let d = try? JSONSerialization.data(withJSONObject: msg),
+               let s = String(data: d, encoding: .utf8) {
+                self.railway.sendText(s)
+            }
+        }
+
+        // Phase 2: Forward Deepgram acoustic events (SpeechStarted, UtteranceEnd)
+        // to Railway so the server can use them as turn-taking signals.
+        // SpeechStarted = pseudo-VAD "someone is talking" (fires on acoustic energy)
+        // UtteranceEnd = "silence after speech" (best answer-complete signal available)
+        deepgram.onEvent = { [weak self] json in
+            guard let self = self else { return }
+            guard let type_ = json["type"] as? String else { return }
+
+            if type_ == "SpeechStarted" || type_ == "UtteranceEnd" {
+                fputs("[Mic-DG-Event] \(type_)\n", stderr)
                 let msg: [String: Any] = [
-                    "type": "desktop_candidate_transcript",
-                    "text": text,
-                    "isFinal": true,
-                    "speaker": "You"
+                    "type": "desktop_deepgram_event",
+                    "event": type_,
+                    "source": "mic"
                 ]
                 if let d = try? JSONSerialization.data(withJSONObject: msg),
                    let s = String(data: d, encoding: .utf8) {
                     self.railway.sendText(s)
                 }
-            } else {
-                fputs("[Mic-Interim] \(text)\n", stderr)
             }
         }
 
