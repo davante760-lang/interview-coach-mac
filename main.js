@@ -370,11 +370,20 @@ if (process.defaultApp && process.argv.length >= 2) {
   app.setAsDefaultProtocolClient('interviewcoach');
 }
 
-// Handle deep link on macOS (app already running)
+// Handle deep link on macOS — works for both cold launch and already-running cases.
+// On cold launch, open-url may fire before whenReady — queue it for later.
+let _queuedDeepLink = null;
+
 app.on('open-url', (event, url) => {
   event.preventDefault();
   console.log('[DeepLink] Received:', url);
   if (url.startsWith('interviewcoach://start')) {
+    if (!app.isReady() || !mainWindow) {
+      // App not ready yet (cold launch) — queue for whenReady
+      console.log('[DeepLink] Queued for cold launch');
+      _queuedDeepLink = url;
+      return;
+    }
     // Extract auth params from URL: interviewcoach://start?token=...&user_id=...
     storeAuthFromURL(url);
     mainWindow?.show();
@@ -404,9 +413,10 @@ app.whenReady().then(async () => {
   startLocalServer();
   startMeetingDetection();
 
-  // Handle deep link when app was closed and launched via URL scheme
-  // (on macOS, argv contains the URL when cold-launched via protocol)
-  const coldLaunchUrl = process.argv.find(a => a.startsWith('interviewcoach://'));
+  // Handle deep link when app was cold-launched via URL scheme.
+  // Check three sources: queued open-url event, process.argv, or delayed open-url.
+  const coldLaunchUrl = _queuedDeepLink || process.argv.find(a => a.startsWith('interviewcoach://'));
+  _queuedDeepLink = null;
   if (coldLaunchUrl) {
     console.log('[DeepLink] Cold launch via URL scheme:', coldLaunchUrl);
     storeAuthFromURL(coldLaunchUrl);
@@ -415,6 +425,18 @@ app.whenReady().then(async () => {
         console.log('[DeepLink] Audio capture started (cold launch)');
       }).catch(e => console.error('[DeepLink] Cold start failed:', e.message));
     }, 1500);
+  } else {
+    // open-url may fire AFTER whenReady on macOS — wait briefly and check
+    setTimeout(() => {
+      if (_queuedDeepLink) {
+        console.log('[DeepLink] Late cold-launch URL:', _queuedDeepLink);
+        storeAuthFromURL(_queuedDeepLink);
+        _queuedDeepLink = null;
+        startAudioCapture('', '').then(() => {
+          console.log('[DeepLink] Audio capture started (late cold launch)');
+        }).catch(e => console.error('[DeepLink] Late cold start failed:', e.message));
+      }
+    }, 2000);
   }
 
   // Silent background update check on launch (non-blocking)
