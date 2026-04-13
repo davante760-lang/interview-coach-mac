@@ -4,11 +4,15 @@ const { spawn, exec } = require('child_process');
 const path = require('path');
 const fs   = require('fs');
 const http = require('http');
+const crypto = require('crypto');
 
 let mainWindow;
 let overlayWindow = null;
 let tray = null;
 let audioProcess = null;
+let _preparedLaunch = null;  // { launchId, userId, role, callType, preparedAt }
+let _activeLaunchId = null;
+let _needsRestart = false;
 
 // ── Website API Base URL ─────────────────────────────────────────────────────
 const WEBSITE_API_BASE = 'https://interviewwebsite-production.up.railway.app';
@@ -16,14 +20,14 @@ const WEBSITE_API_BASE = 'https://interviewwebsite-production.up.railway.app';
 // ── Dev: --reset flag clears all auth data for clean testing ─────────────────
 if (process.argv.includes('--reset')) {
   const userDataPath = app.getPath('userData');
-  const filesToClear = ['session.enc', 'user-profile.json'];
+  const filesToClear = ['session.enc', 'user-profile.json', 'companion-token.enc', 'active-launch.json'];
   filesToClear.forEach(f => {
     try { fs.unlinkSync(path.join(userDataPath, f)); } catch {}
   });
   // Clear auth keys from settings but keep window/overlay prefs
   try {
     const s = JSON.parse(fs.readFileSync(path.join(userDataPath, 'settings.json'), 'utf8'));
-    delete s.userId; delete s.desktopToken; delete s.desktopApiKey; delete s._sessionTokenFallback;
+    delete s.userId; delete s.desktopToken; delete s.desktopApiKey; delete s._sessionTokenFallback; delete s._companionTokenFallback;
     fs.writeFileSync(path.join(userDataPath, 'settings.json'), JSON.stringify(s));
   } catch {}
   console.log('[Dev] Auth data cleared via --reset flag');
@@ -83,6 +87,45 @@ function clearSessionToken() {
   try { fs.unlinkSync(SESSION_PATH); } catch {}
   const s = loadSettings();
   delete s._sessionTokenFallback;
+  saveSettings(s);
+}
+
+// ── Companion Token Storage (secure, for browser-companion auth) ───────────
+
+const COMPANION_TOKEN_PATH = path.join(app.getPath('userData'), 'companion-token.enc');
+
+function storeCompanionToken(token) {
+  try {
+    if (!safeStorage.isEncryptionAvailable()) {
+      const s = loadSettings();
+      s._companionTokenFallback = token;
+      saveSettings(s);
+      return;
+    }
+    const encrypted = safeStorage.encryptString(token);
+    fs.writeFileSync(COMPANION_TOKEN_PATH, encrypted);
+  } catch (e) {
+    console.warn('[Companion] Failed to store token:', e.message);
+  }
+}
+
+function loadCompanionToken() {
+  try {
+    if (fs.existsSync(COMPANION_TOKEN_PATH) && safeStorage.isEncryptionAvailable()) {
+      const encrypted = fs.readFileSync(COMPANION_TOKEN_PATH);
+      return safeStorage.decryptString(encrypted);
+    }
+    const s = loadSettings();
+    return s._companionTokenFallback || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function clearCompanionToken() {
+  try { fs.unlinkSync(COMPANION_TOKEN_PATH); } catch {}
+  const s = loadSettings();
+  delete s._companionTokenFallback;
   saveSettings(s);
 }
 
@@ -419,23 +462,21 @@ function createTray() {
 
 function updateTrayMenu(isRecording = false) {
   if (!tray) return;
-  const menu = Menu.buildFromTemplate([
-    {
-      label: isRecording ? '● Recording…' : 'Ready',
-      enabled: false
-    },
+  const companionToken = loadCompanionToken();
+  const status = isRecording ? '🔴 Recording' : (companionToken ? '✓ Ready' : '⚠ Not signed in');
+
+  const contextMenu = Menu.buildFromTemplate([
+    { label: status, enabled: false },
     { type: 'separator' },
-    {
-      label: 'Show Window',
-      click: () => { mainWindow.show(); mainWindow.focus(); }
-    },
+    { label: 'Open in Browser', click: () => {
+      require('electron').shell.openExternal('https://interviewcoach-production.up.railway.app');
+    }},
+    { label: 'Check for Updates', click: () => autoUpdater.checkForUpdates() },
     { type: 'separator' },
-    {
-      label: 'Quit',
-      click: () => { app.isQuitting = true; app.quit(); }
-    }
+    { label: 'Settings', click: () => { mainWindow?.show(); } },
+    { label: 'Quit', click: () => { app.isQuitting = true; app.quit(); } }
   ]);
-  tray.setContextMenu(menu);
+  tray.setContextMenu(contextMenu);
 }
 
 // ── Window ──────────────────────────────────────────────────────────────────
@@ -444,10 +485,10 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 420, height: 600, resizable: true,
     titleBarStyle: 'hiddenInset', backgroundColor: '#0f172a',
+    show: false,  // START HIDDEN
     webPreferences: { nodeIntegration: true, contextIsolation: false }
   });
   mainWindow.loadFile('index.html');
-  // Hide to tray instead of quitting when window is closed
   mainWindow.on('close', (e) => {
     if (!app.isQuitting) {
       e.preventDefault();
@@ -538,58 +579,85 @@ app.on('open-url', (event, url) => {
 });
 
 async function handleActivateDeepLink(url) {
+  const urlObj = new URL(url);
+  const token = urlObj.searchParams.get('token');
+  if (!token) {
+    console.error('[DeepLink] No token in activate URL');
+    return;
+  }
+
+  console.log('[DeepLink] Activating via auth bridge...');
+
+  // Hit the auth bridge on the Interview Coach server
+  const IC_SERVER = process.env.IC_SERVER_URL || 'https://interviewcoach-production.up.railway.app';
+
   try {
-    const qIdx = url.indexOf('?');
-    if (qIdx === -1) return;
-    const params = new URLSearchParams(url.substring(qIdx));
-    const token = params.get('token');
-    if (!token) {
-      console.warn('[DeepLink] No token in activate URL');
-      mainWindow?.show();
-      mainWindow?.webContents.send('auth-result', { success: false, error: 'missing_token' });
+    const response = await new Promise((resolve, reject) => {
+      const postData = JSON.stringify({ token, client: 'electron' });
+      const reqUrl = new URL('/auth/bridge', IC_SERVER);
+      const req = net.request({
+        method: 'POST',
+        url: reqUrl.toString(),
+      });
+      req.setHeader('Content-Type', 'application/json');
+
+      let data = '';
+      req.on('response', (res) => {
+        res.on('data', chunk => data += chunk.toString());
+        res.on('end', () => {
+          try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
+          catch { reject(new Error('Invalid response')); }
+        });
+      });
+      req.on('error', reject);
+      req.write(postData);
+      req.end();
+    });
+
+    if (response.status !== 200 || !response.body.success) {
+      console.error('[DeepLink] Bridge failed:', response.body);
+      showNotification('Activation Failed', 'Please try the link again or sign in from the browser.');
       return;
     }
 
-    mainWindow?.show();
-    mainWindow?.webContents.send('auth-loading');
+    const { companionToken, userId, email, role, stage } = response.body;
 
-    const result = await validateActivationToken(token);
-    if (result.success) {
-      console.log('[DeepLink] Activation successful for:', result.email);
-      // Store session securely
-      storeSessionToken(result.session_token);
-      // Store profile locally
-      storeUserProfile({
-        user_id: result.user_id,
-        email: result.email,
-        role: result.role,
-        stage: result.stage,
-        first_launch: true
-      });
-      // Also store userId for existing audio capture auth
-      const s = loadSettings();
-      s.userId = result.user_id;
-      saveSettings(s);
-      // Tell renderer to show first-practice screen
-      mainWindow?.webContents.send('auth-result', {
-        success: true,
-        user_id: result.user_id,
-        email: result.email,
-        role: result.role,
-        stage: result.stage,
-        first_launch: true
-      });
-    } else {
-      console.warn('[DeepLink] Activation failed:', result.error);
-      mainWindow?.webContents.send('auth-result', {
-        success: false,
-        error: result.error,
-        message: result.message
-      });
+    // Store companion token securely
+    storeCompanionToken(companionToken);
+
+    // Store user profile
+    storeUserProfile({ userId, email, role, stage });
+
+    console.log(`[DeepLink] Activated: ${email} (${role})`);
+
+    // Request mic permission if needed
+    if (process.platform === 'darwin') {
+      const mic = systemPreferences.getMediaAccessStatus('microphone');
+      if (mic !== 'granted') {
+        await systemPreferences.askForMediaAccess('microphone');
+      }
     }
-  } catch (e) {
-    console.error('[DeepLink] Activation error:', e.message);
-    mainWindow?.webContents.send('auth-result', { success: false, error: 'unexpected', message: e.message });
+
+    // Show notification and retreat to tray
+    showNotification('Interview Coach Ready', 'Head back to your browser to start your practice.');
+
+    // Open browser to practice/first page
+    const { shell } = require('electron');
+    shell.openExternal(`${IC_SERVER}/practice/first`);
+
+    // Hide the window — tray only
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.hide();
+    }
+  } catch (err) {
+    console.error('[DeepLink] Activation error:', err.message);
+    showNotification('Connection Error', 'Check your internet and try again.');
+  }
+}
+
+function showNotification(title, body) {
+  if (Notification.isSupported()) {
+    new Notification({ title, body }).show();
   }
 }
 
@@ -599,21 +667,13 @@ async function handleActivateDeepLink(url) {
 app.whenReady().then(async () => {
   const isPreview = process.argv.includes('--preview');
 
-  // Skip permission prompts in preview mode
-  if (!isPreview && process.platform === 'darwin') {
-    const mic = systemPreferences.getMediaAccessStatus('microphone');
-    if (mic !== 'granted') await systemPreferences.askForMediaAccess('microphone');
-    const screen = systemPreferences.getMediaAccessStatus('screen');
-    console.log('[Main] Screen:', screen, '| Mic:', mic);
-  }
   buildMenu();
   createWindow();
-  if (!isPreview) createTray();
+  createTray();
 
-  // ── Preview mode: show a specific screen with mock data, skip all auth ──
-  const previewScreen = isPreview ? '--preview' : null;
-  if (previewScreen) {
-    const screen = process.argv[process.argv.indexOf(previewScreen) + 1] || 'first-practice';
+  // Preview mode — show specific screen with mock data
+  if (isPreview) {
+    const screen = process.argv[process.argv.indexOf('--preview') + 1] || 'first-practice';
     const mockProfile = {
       user_id: 'preview-user',
       email: 'alex@techsales.com',
@@ -621,8 +681,7 @@ app.whenReady().then(async () => {
       stage: 'actively_interviewing',
       first_launch: true
     };
-    // Override role if passed: --preview first-practice mid_market_ae
-    const roleArg = process.argv[process.argv.indexOf(previewScreen) + 2];
+    const roleArg = process.argv[process.argv.indexOf('--preview') + 2];
     if (roleArg && ['sdr_bdr','mid_market_ae','enterprise_ae','se_csm_am','sales_manager_director','vp_plus'].includes(roleArg)) {
       mockProfile.role = roleArg;
     }
@@ -635,92 +694,47 @@ app.whenReady().then(async () => {
     mainWindow.setAlwaysOnTop(true);
     setTimeout(() => mainWindow.setAlwaysOnTop(false), 2000);
     console.log(`[Preview] Showing "${screen}" screen with role: ${mockProfile.role}`);
-    return; // Skip all auth, meeting detection, deep link handling
+    return;
   }
 
-  // Overlay created on demand — not on startup
+  // Always start local server — browser needs it
   startLocalServer();
-  startMeetingDetection();
 
-  // Handle deep link when app was cold-launched via URL scheme.
+  // Handle deep link on cold launch
   const coldLaunchUrl = _queuedDeepLink || process.argv.find(a => a.startsWith('interviewcoach://'));
   _queuedDeepLink = null;
-  if (coldLaunchUrl) {
-    console.log('[DeepLink] Cold launch via URL scheme:', coldLaunchUrl);
-    if (coldLaunchUrl.startsWith('interviewcoach://activate')) {
-      // First-launch activation — handle via website API
-      handleActivateDeepLink(coldLaunchUrl);
-    } else {
-      // Existing start-capture flow
-      storeAuthFromURL(coldLaunchUrl);
-      setTimeout(() => {
-        startAudioCapture('', '').then(() => {
-          console.log('[DeepLink] Audio capture started (cold launch)');
-        }).catch(e => console.error('[DeepLink] Cold start failed:', e.message));
-      }, 1500);
-    }
-  } else {
-    // open-url may fire AFTER whenReady on macOS — wait briefly and check
-    setTimeout(() => {
-      if (_queuedDeepLink) {
-        const url = _queuedDeepLink;
-        _queuedDeepLink = null;
-        console.log('[DeepLink] Late cold-launch URL:', url);
-        if (url.startsWith('interviewcoach://activate')) {
-          handleActivateDeepLink(url);
-        } else {
-          storeAuthFromURL(url);
-          startAudioCapture('', '').then(() => {
-            console.log('[DeepLink] Audio capture started (late cold launch)');
-          }).catch(e => console.error('[DeepLink] Late cold start failed:', e.message));
-        }
-      } else {
-        // No deep link — check for existing session or show login
-        checkSessionOnLaunch();
-      }
-    }, 2000);
+  if (coldLaunchUrl && coldLaunchUrl.startsWith('interviewcoach://activate')) {
+    handleActivateDeepLink(coldLaunchUrl);
+    return;
   }
 
-  async function checkSessionOnLaunch() {
-    const sessionToken = loadSessionToken();
-    if (sessionToken) {
-      // Returning user — validate session
-      console.log('[Auth] Found stored session, validating...');
-      mainWindow?.webContents.send('auth-loading');
-      const result = await validateSession(sessionToken);
-      if (result.valid) {
-        console.log('[Auth] Session valid for:', result.email);
-        storeUserProfile({
-          user_id: result.user_id,
-          email: result.email,
-          role: result.role,
-          stage: result.stage,
-          first_launch: false
+  // Normal launch — check if we have a companion token
+  const companionToken = loadCompanionToken();
+  if (companionToken) {
+    // Authenticated — stay hidden, just tray + server
+    console.log('[Main] Companion token found — running as background companion');
+
+    // Check permissions silently
+    if (process.platform === 'darwin') {
+      const mic = systemPreferences.getMediaAccessStatus('microphone');
+      const screen = systemPreferences.getMediaAccessStatus('screen');
+      if (mic !== 'granted' || screen !== 'granted') {
+        // Show permission window
+        mainWindow.show();
+        mainWindow.webContents.on('did-finish-load', () => {
+          mainWindow.webContents.send('show-permissions', { mic, screen });
         });
-        mainWindow?.webContents.send('auth-result', {
-          success: true,
-          user_id: result.user_id,
-          email: result.email,
-          role: result.role,
-          stage: result.stage,
-          first_launch: false
-        });
-      } else {
-        console.log('[Auth] Session expired, showing login');
-        clearSessionToken();
-        clearUserProfile();
-        mainWindow?.webContents.send('show-login', { reason: 'session_expired' });
-      }
-    } else {
-      // No session — show login screen
-      const profile = loadUserProfile();
-      if (!profile) {
-        mainWindow?.webContents.send('show-login', {});
-      } else {
-        mainWindow?.webContents.send('show-login', { email: profile.email });
       }
     }
+  } else {
+    // No companion token — show login prompt
+    mainWindow.show();
+    mainWindow.webContents.on('did-finish-load', () => {
+      mainWindow.webContents.send('show-login');
+    });
   }
+
+  startMeetingDetection();
 
   // Silent background update check on launch (non-blocking)
   setTimeout(() => {
@@ -872,99 +886,200 @@ ipcMain.handle('start-capture', async (event, { prospectName, prospectCompany })
 // without needing a meeting bot.
 
 function startLocalServer() {
+  const ALLOWED_ORIGINS = [
+    'https://interviewcoach-production.up.railway.app',
+    'http://localhost:3000',
+    'http://localhost:4173',
+    'http://localhost:5173'
+  ];
+
   const server = http.createServer((req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    const origin = req.headers.origin || '';
+    const isAllowed = ALLOWED_ORIGINS.includes(origin) || origin.startsWith('http://localhost:');
+
+    res.setHeader('Access-Control-Allow-Origin', isAllowed ? origin : ALLOWED_ORIGINS[0]);
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Companion-Token');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
     if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
 
-    if (req.method === 'GET' && req.url === '/status') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, recording: audioProcess !== null }));
-      return;
-    }
+    const sendJson = (code, data) => {
+      res.writeHead(code, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(data));
+    };
 
-    if (req.method === 'POST' && req.url === '/start') {
+    const readBody = () => new Promise((resolve) => {
       let body = '';
       req.on('data', c => body += c);
-      req.on('end', async () => {
-        const data = JSON.parse(body || '{}');
-        const hadAuth = !!_sessionToken;
-        // Store auth credentials from web app (Clerk token + userId)
-        storeAuthFromPayload(data);
-        const hasAuthNow = !!_sessionToken;
+      req.on('end', () => {
+        try { resolve(JSON.parse(body || '{}')); }
+        catch { resolve({}); }
+      });
+    });
 
-        // If Swift is already running WITH auth, just ack — don't restart
-        if (audioProcess && hadAuth) {
-          console.log('[HTTP] Capture already running with auth — skipping restart');
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: true, already: true }));
-          return;
+    // GET /status — companion state for browser detection
+    if (req.method === 'GET' && req.url === '/status') {
+      const pkg = require('./package.json');
+      const token = loadCompanionToken();
+      const mic = process.platform === 'darwin'
+        ? systemPreferences.getMediaAccessStatus('microphone')
+        : 'granted';
+      const screen = process.platform === 'darwin'
+        ? systemPreferences.getMediaAccessStatus('screen')
+        : 'granted';
+
+      let state = 'ready';
+      if (!token) state = 'needsLogin';
+      else if (mic !== 'granted' || screen !== 'granted') state = 'needsPermissions';
+      else if (audioProcess) state = _activeLaunchId ? 'session_bound' : 'capturing';
+
+      sendJson(200, {
+        ok: true,
+        version: pkg.version,
+        state,
+        authenticated: !!token,
+        recording: audioProcess !== null,
+        needsRestart: _needsRestart || false,
+        activeLaunchId: _activeLaunchId || null,
+        permissions: {
+          microphone: mic,
+          screenRecording: screen
         }
-
-        // If Swift is running but WITHOUT auth, restart it with credentials
-        if (audioProcess && !hadAuth && hasAuthNow) {
-          console.log('[HTTP] Restarting capture with fresh auth credentials');
-          stopAudioProcess();
-          await new Promise(r => setTimeout(r, 1500));
-        }
-
-        // Route through renderer so it updates its UI state (same path as meeting auto-start)
-        mainWindow?.show();
-        mainWindow?.focus();
-        try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('web-start-capture', {
-          prospectName: data.prospectName || '',
-          prospectCompany: data.prospectCompany || ''
-        }); } catch (_) {}
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true }));
       });
       return;
     }
 
+    // GET /permissions — detailed permission state
+    if (req.method === 'GET' && req.url === '/permissions') {
+      const mic = process.platform === 'darwin'
+        ? systemPreferences.getMediaAccessStatus('microphone')
+        : 'granted';
+      const screen = process.platform === 'darwin'
+        ? systemPreferences.getMediaAccessStatus('screen')
+        : 'granted';
+      sendJson(200, { microphone: mic, screenRecording: screen });
+      return;
+    }
+
+    // POST /prepare — validate launch token, arm for capture
+    if (req.method === 'POST' && req.url === '/prepare') {
+      readBody().then(data => {
+        if (!data.launchToken) return sendJson(400, { error: 'missing_launch_token' });
+
+        // Validate launch token (HMAC-SHA256)
+        try {
+          const [headerB64, payloadB64, signatureB64] = data.launchToken.split('.');
+          const LAUNCH_SECRET = process.env.BRIDGE_JWT_SECRET || 'dev-bridge-secret';
+          const expectedSig = crypto
+            .createHmac('sha256', LAUNCH_SECRET)
+            .update(`${headerB64}.${payloadB64}`)
+            .digest('base64url');
+
+          if (expectedSig !== signatureB64) return sendJson(401, { error: 'invalid_launch_token' });
+
+          const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString());
+          if (payload.exp && Date.now() / 1000 > payload.exp) {
+            return sendJson(401, { error: 'launch_token_expired' });
+          }
+
+          _preparedLaunch = {
+            launchId: payload.launchId,
+            userId: payload.userId,
+            role: payload.role,
+            callType: payload.callType,
+            preparedAt: Date.now()
+          };
+
+          console.log(`[LocalServer] Prepared launch=${payload.launchId} role=${payload.role}`);
+          sendJson(200, { status: 'prepared', launchId: payload.launchId });
+        } catch (e) {
+          sendJson(401, { error: 'invalid_launch_token' });
+        }
+      });
+      return;
+    }
+
+    // POST /commit-start — actually start capture + overlay
+    if (req.method === 'POST' && req.url === '/commit-start') {
+      readBody().then(async (data) => {
+        if (!data.launchId) return sendJson(400, { error: 'missing_launch_id' });
+        if (!_preparedLaunch || _preparedLaunch.launchId !== data.launchId) {
+          return sendJson(400, { error: 'not_prepared', message: 'Call /prepare first' });
+        }
+
+        // Check prepare didn't expire (30 seconds)
+        if (Date.now() - _preparedLaunch.preparedAt > 30000) {
+          _preparedLaunch = null;
+          return sendJson(400, { error: 'prepare_expired' });
+        }
+
+        _activeLaunchId = data.launchId;
+
+        // Start audio capture
+        try {
+          await startAudioCapture(data.prospectName || 'Practice Interview', data.prospectCompany || '');
+        } catch (e) {
+          _activeLaunchId = null;
+          return sendJson(500, { error: 'capture_failed', message: e.message });
+        }
+
+        // Show overlay
+        if (!overlayWindow) createOverlayWindow();
+        overlayWindow?.show();
+
+        // Persist launchId for recovery
+        try {
+          fs.writeFileSync(path.join(app.getPath('userData'), 'active-launch.json'),
+            JSON.stringify({ launchId: _activeLaunchId, startedAt: Date.now() }));
+        } catch {}
+
+        console.log(`[LocalServer] Committed launch=${data.launchId} — capture started`);
+        sendJson(200, { status: 'capturing', launchId: data.launchId });
+
+        _preparedLaunch = null; // consumed
+      });
+      return;
+    }
+
+    // POST /stop — stop capture
     if (req.method === 'POST' && req.url === '/stop') {
       stopAudioProcess();
-      try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('web-stop-capture'); } catch (_) {}
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true }));
+      _activeLaunchId = null;
+      _preparedLaunch = null;
+      overlayWindow?.hide();
+      try { fs.unlinkSync(path.join(app.getPath('userData'), 'active-launch.json')); } catch {}
+      sendJson(200, { status: 'stopped' });
       return;
     }
 
-    if (req.method === 'POST' && req.url === '/overlay/coaching') {
-      // DISABLED per user request — overlay no longer auto-shows on coaching events.
-      // Drain the body and ack without showing the window.
-      req.on('data', () => {});
-      req.on('end', () => {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, suppressed: true }));
-      });
+    // POST /restart — self-restart for permission refresh
+    if (req.method === 'POST' && req.url === '/restart') {
+      app.relaunch();
+      app.quit();
       return;
     }
 
+    // Legacy overlay endpoints (keep for now)
     if (req.method === 'POST' && req.url === '/overlay/test') {
       if (!overlayWindow) createOverlayWindow();
       overlayWindow.show();
       overlayWindow.webContents.send('overlay-test-mode');
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true }));
+      sendJson(200, { ok: true });
       return;
     }
 
     if (req.method === 'POST' && req.url === '/overlay/hide') {
       overlayWindow?.hide();
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true }));
+      sendJson(200, { ok: true });
       return;
     }
 
-    res.writeHead(404); res.end();
+    sendJson(404, { error: 'not_found' });
   });
 
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
       console.log('[LocalServer] Port 59842 in use — killing stale process and retrying...');
-      // Kill whatever is holding the port, then retry after 500ms
-      const { exec } = require('child_process');
       exec("lsof -ti:59842 | xargs kill -9", () => {
         setTimeout(() => {
           server.listen(59842, '127.0.0.1', () => {
@@ -1057,6 +1172,30 @@ ipcMain.handle('dismiss-meeting-prompt', async () => {
   _dismissedUntil = Date.now() + 45 * 60 * 1000;
   _meetingStartedCapture = false;
   return { ok: true };
+});
+
+// ── Permission + Window IPC (companion mode) ───────────────────────────────
+
+ipcMain.handle('request-mic-permission', async () => {
+  if (process.platform === 'darwin') {
+    const result = await systemPreferences.askForMediaAccess('microphone');
+    return { granted: result };
+  }
+  return { granted: true };
+});
+
+ipcMain.on('recheck-permissions', (event) => {
+  if (process.platform === 'darwin') {
+    const mic = systemPreferences.getMediaAccessStatus('microphone');
+    const screen = systemPreferences.getMediaAccessStatus('screen');
+    event.sender.send('show-permissions', { mic, screen });
+  }
+});
+
+ipcMain.on('hide-window', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.hide();
+  }
 });
 
 function stopAudioProcess() {
