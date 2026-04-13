@@ -1071,6 +1071,40 @@ function startLocalServer() {
       return;
     }
 
+    // POST /start — legacy compatibility for main app's /#practice flow
+    // Accepts { authToken, userId, desktopToken, prospectName, prospectCompany }
+    if (req.method === 'POST' && req.url === '/start') {
+      readBody().then(async (data) => {
+        // Store auth for getServerURL()
+        if (data.authToken) _sessionToken = data.authToken;
+        if (data.userId) _sessionUserId = data.userId;
+        if (data.desktopToken) {
+          try {
+            const settings = loadSettings ? loadSettings() : {};
+            settings.desktopToken = data.desktopToken;
+            fs.writeFileSync(path.join(app.getPath('userData'), 'settings.json'), JSON.stringify(settings, null, 2));
+          } catch (e) { console.warn('[/start] Could not persist desktopToken:', e.message); }
+        }
+
+        // If already recording, stop first so we restart with the new auth
+        if (audioProcess) {
+          console.log('[/start] Already recording — stopping to restart with fresh auth');
+          stopAudioProcess();
+          await new Promise(r => setTimeout(r, 800));
+        }
+
+        try {
+          await startAudioCapture(data.prospectName || '', data.prospectCompany || '');
+          console.log('[/start] Legacy start succeeded');
+          sendJson(200, { status: 'started' });
+        } catch (e) {
+          console.error('[/start] Failed:', e.message);
+          sendJson(500, { error: 'capture_failed', message: e.message });
+        }
+      });
+      return;
+    }
+
     // POST /stop — stop capture
     if (req.method === 'POST' && req.url === '/stop') {
       stopAudioProcess();
