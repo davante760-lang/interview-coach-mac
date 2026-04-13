@@ -298,9 +298,310 @@ input.field::placeholder { color: var(--t4); }
 }
 .toggle input:checked + .toggle-slider { background: var(--accent); }
 .toggle input:checked + .toggle-slider::before { transform: translateX(16px); }
+
+/* ── First-Launch Screens ─────────────────────────────────────────────────── */
+
+.view { display: none; }
+.view.active { display: flex; flex-direction: column; flex: 1; }
+
+/* Loading screen */
+.loading-screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+.loading-spinner {
+  width: 32px; height: 32px;
+  border: 2.5px solid var(--border-visible);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-text { font-size: 13px; color: var(--t3); }
+
+/* Login screen */
+.login-screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 32px 24px;
+  text-align: center;
+}
+.login-logo {
+  font-size: 40px;
+  color: var(--accent);
+  text-shadow: 0 0 30px rgba(0, 224, 204, 0.35);
+  margin-bottom: 4px;
+}
+.login-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--t1);
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+}
+.login-form {
+  width: 100%;
+  max-width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  -webkit-app-region: no-drag;
+}
+.login-btn {
+  padding: 13px;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--void);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s;
+  box-shadow: 0 0 24px rgba(0, 224, 204, 0.18);
+}
+.login-btn:hover { background: var(--accent-bright); box-shadow: 0 0 32px rgba(0, 224, 204, 0.3); }
+.login-btn:disabled { opacity: 0.5; cursor: default; }
+.login-hint {
+  font-size: 11px;
+  color: var(--t4);
+  line-height: 1.5;
+}
+.login-notice {
+  font-size: 11px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  max-width: 300px;
+}
+
+/* Waiting for magic link */
+.waiting-screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 32px 24px;
+  text-align: center;
+}
+.waiting-icon {
+  font-size: 36px;
+  margin-bottom: 4px;
+}
+.waiting-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--t1);
+}
+.waiting-subtitle {
+  font-size: 13px;
+  color: var(--t3);
+  line-height: 1.6;
+  max-width: 280px;
+}
+.waiting-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+}
+.waiting-link {
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+  background: none;
+  border: none;
+  font-family: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.waiting-link:hover { color: var(--accent-bright); }
+.waiting-fallback {
+  font-size: 11px;
+  color: var(--t4);
+  line-height: 1.5;
+  max-width: 280px;
+}
+.waiting-fallback a { color: var(--accent); text-decoration: none; }
+.waiting-fallback a:hover { text-decoration: underline; }
+
+/* First Practice Interview screen */
+.first-practice-screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+}
+.fp-headline {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--t1);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+.fp-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  padding: 16px;
+  backdrop-filter: blur(12px);
+}
+.fp-card-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin-bottom: 12px;
+}
+.fp-card-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 13px;
+}
+.fp-card-row + .fp-card-row {
+  border-top: 1px solid var(--border);
+}
+.fp-card-label { color: var(--t4); }
+.fp-card-value { color: var(--t2); font-weight: 500; }
+.fp-cta {
+  width: 100%;
+  padding: 16px;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--void);
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all .15s;
+  box-shadow: 0 0 30px rgba(0, 224, 204, 0.2);
+  letter-spacing: -0.01em;
+  -webkit-app-region: no-drag;
+}
+.fp-cta:hover {
+  background: var(--accent-bright);
+  box-shadow: 0 0 40px rgba(0, 224, 204, 0.35);
+  transform: translateY(-1px);
+}
+.fp-meta {
+  font-size: 11px;
+  color: var(--t4);
+  text-align: center;
+}
+.fp-secondary {
+  text-align: center;
+  -webkit-app-region: no-drag;
+}
+.fp-secondary a {
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: none;
+  opacity: 0.7;
+}
+.fp-secondary a:hover { opacity: 1; text-decoration: underline; }
 </style>
 </head>
 <body>
+
+  <!-- ═══════ VIEW: Loading ═══════ -->
+  <div id="view-loading" class="view">
+    <div class="loading-screen">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">Signing you in...</div>
+    </div>
+  </div>
+
+  <!-- ═══════ VIEW: Login ═══════ -->
+  <div id="view-login" class="view">
+    <div class="login-screen">
+      <div class="login-logo">◆</div>
+      <div class="login-title">Welcome to Interview Coach</div>
+      <div id="login-notice" class="login-notice" style="display:none;"></div>
+      <div class="login-form">
+        <input class="field" id="login-email" type="email" placeholder="Enter your email" autocomplete="email">
+        <button class="login-btn" id="login-btn" onclick="onSendMagicLink()">Send Login Link</button>
+      </div>
+      <div class="login-hint">We'll send a link to sign you in instantly. No password needed.</div>
+    </div>
+  </div>
+
+  <!-- ═══════ VIEW: Waiting for Magic Link ═══════ -->
+  <div id="view-waiting" class="view">
+    <div class="waiting-screen">
+      <div class="waiting-icon">✉</div>
+      <div class="waiting-title">Check your email</div>
+      <div class="waiting-subtitle">Click the link we sent to <strong id="waiting-email"></strong> to sign in.</div>
+      <div class="waiting-actions">
+        <button class="waiting-link" id="btn-resend" style="display:none;" onclick="onResendMagicLink()">Resend link</button>
+        <button class="waiting-link" onclick="switchView('login')">Use a different email</button>
+      </div>
+      <div id="waiting-fallback" class="waiting-fallback" style="display:none;">
+        Didn't receive a link? Make sure you've signed up at
+        <a href="#" onclick="require('electron').shell.openExternal('https://interviewcoach.ai/start');return false;">interviewcoach.ai/start</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════ VIEW: First Practice Interview ═══════ -->
+  <div id="view-first-practice" class="view">
+    <div class="first-practice-screen">
+      <div class="header" style="margin-bottom:4px;">
+        <span class="logo">◆</span>
+        <div>
+          <div class="title">Interview Coach</div>
+          <div class="subtitle" id="fp-email"></div>
+        </div>
+      </div>
+
+      <div class="fp-headline">Your first practice interview is ready.</div>
+
+      <div class="fp-card">
+        <div class="fp-card-title">Practice Interview Setup</div>
+        <div class="fp-card-row">
+          <span class="fp-card-label">Your role</span>
+          <span class="fp-card-value" id="fp-role">—</span>
+        </div>
+        <div class="fp-card-row">
+          <span class="fp-card-label">Round type</span>
+          <span class="fp-card-value" id="fp-round">—</span>
+        </div>
+        <div class="fp-card-row">
+          <span class="fp-card-label">Questions</span>
+          <span class="fp-card-value">Calibrated to your level</span>
+        </div>
+        <div class="fp-card-row">
+          <span class="fp-card-label">Duration</span>
+          <span class="fp-card-value">~15 minutes</span>
+        </div>
+      </div>
+
+      <button class="fp-cta" onclick="onStartFirstPractice()">Start Practice Interview →</button>
+      <div class="fp-meta">8 questions · ~15 minutes · Scored with feedback after each answer</div>
+      <div class="fp-secondary">
+        <a href="#" onclick="onSkipToMain();return false;">Set up your Prep Cards first →</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════ VIEW: Main (existing audio capture UI) ═══════ -->
+  <div id="view-main" class="view">
 
   <div class="header">
     <span class="logo">◆</span>
@@ -399,6 +700,8 @@ input.field::placeholder { color: var(--t4); }
     No bots · No virtual cables · No browser permissions.<br>
     <span id="app-version" style="color:#475569"></span>
   </div>
+
+  </div><!-- /view-main -->
 
   <script src="renderer.js"></script>
 </body>

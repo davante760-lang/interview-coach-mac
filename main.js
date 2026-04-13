@@ -1,4 +1,4 @@
-const { app, BrowserWindow, systemPreferences, ipcMain, Menu, Tray, nativeImage, Notification } = require('electron');
+const { app, BrowserWindow, systemPreferences, ipcMain, Menu, Tray, nativeImage, Notification, safeStorage, net } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { spawn, exec } = require('child_process');
 const path = require('path');
@@ -9,6 +9,25 @@ let mainWindow;
 let overlayWindow = null;
 let tray = null;
 let audioProcess = null;
+
+// ── Website API Base URL ─────────────────────────────────────────────────────
+const WEBSITE_API_BASE = 'https://interviewwebsite-production.up.railway.app';
+
+// ── Dev: --reset flag clears all auth data for clean testing ─────────────────
+if (process.argv.includes('--reset')) {
+  const userDataPath = app.getPath('userData');
+  const filesToClear = ['session.enc', 'user-profile.json'];
+  filesToClear.forEach(f => {
+    try { fs.unlinkSync(path.join(userDataPath, f)); } catch {}
+  });
+  // Clear auth keys from settings but keep window/overlay prefs
+  try {
+    const s = JSON.parse(fs.readFileSync(path.join(userDataPath, 'settings.json'), 'utf8'));
+    delete s.userId; delete s.desktopToken; delete s.desktopApiKey; delete s._sessionTokenFallback;
+    fs.writeFileSync(path.join(userDataPath, 'settings.json'), JSON.stringify(s));
+  } catch {}
+  console.log('[Dev] Auth data cleared via --reset flag');
+}
 
 // ── Settings (persisted to userData/settings.json) ──────────────────────────
 
@@ -21,6 +40,129 @@ function loadSettings() {
 
 function saveSettings(s) {
   try { fs.writeFileSync(SETTINGS_PATH, JSON.stringify(s)); } catch {}
+}
+
+// ── Secure Session Storage (macOS Keychain / Windows Credential Manager) ────
+// Uses Electron's safeStorage API to encrypt/decrypt session tokens at rest.
+// The encrypted blob is stored in a file — the key lives in the OS keychain.
+
+const SESSION_PATH = path.join(app.getPath('userData'), 'session.enc');
+
+function storeSessionToken(token) {
+  try {
+    if (!safeStorage.isEncryptionAvailable()) {
+      // Fallback: store in settings (not ideal but functional)
+      const s = loadSettings();
+      s._sessionTokenFallback = token;
+      saveSettings(s);
+      return;
+    }
+    const encrypted = safeStorage.encryptString(token);
+    fs.writeFileSync(SESSION_PATH, encrypted);
+  } catch (e) {
+    console.warn('[Session] Failed to store token:', e.message);
+  }
+}
+
+function loadSessionToken() {
+  try {
+    if (fs.existsSync(SESSION_PATH) && safeStorage.isEncryptionAvailable()) {
+      const encrypted = fs.readFileSync(SESSION_PATH);
+      return safeStorage.decryptString(encrypted);
+    }
+    // Fallback check
+    const s = loadSettings();
+    return s._sessionTokenFallback || null;
+  } catch (e) {
+    console.warn('[Session] Failed to load token:', e.message);
+    return null;
+  }
+}
+
+function clearSessionToken() {
+  try { fs.unlinkSync(SESSION_PATH); } catch {}
+  const s = loadSettings();
+  delete s._sessionTokenFallback;
+  saveSettings(s);
+}
+
+// ── User Profile (stored locally after auth) ────────────────────────────────
+
+const PROFILE_PATH = path.join(app.getPath('userData'), 'user-profile.json');
+
+function storeUserProfile(profile) {
+  try { fs.writeFileSync(PROFILE_PATH, JSON.stringify(profile)); } catch {}
+}
+
+function loadUserProfile() {
+  try { return JSON.parse(fs.readFileSync(PROFILE_PATH, 'utf8')); }
+  catch { return null; }
+}
+
+function clearUserProfile() {
+  try { fs.unlinkSync(PROFILE_PATH); } catch {}
+}
+
+// ── Website API Client ──────────────────────────────────────────────────────
+
+function apiRequest(method, endpoint, body, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const url = `${WEBSITE_API_BASE}${endpoint}`;
+    const request = net.request({ method, url });
+    for (const [k, v] of Object.entries(headers)) request.setHeader(k, v);
+    request.setHeader('Content-Type', 'application/json');
+
+    let responseBody = '';
+    request.on('response', (response) => {
+      response.on('data', (chunk) => { responseBody += chunk.toString(); });
+      response.on('end', () => {
+        try {
+          const data = JSON.parse(responseBody);
+          resolve({ status: response.statusCode, data });
+        } catch {
+          resolve({ status: response.statusCode, data: { raw: responseBody } });
+        }
+      });
+    });
+    request.on('error', reject);
+    if (body) request.write(JSON.stringify(body));
+    request.end();
+  });
+}
+
+async function validateActivationToken(token) {
+  try {
+    console.log('[Auth] Calling validate-token at:', `${WEBSITE_API_BASE}/api/auth/validate-token`);
+    console.log('[Auth] Token (first 16 chars):', token.substring(0, 16) + '...');
+    const { status, data } = await apiRequest('POST', '/api/auth/validate-token', { token });
+    console.log('[Auth] Response status:', status, 'body:', JSON.stringify(data));
+    if (status === 200 && data.success) return data;
+    return { success: false, error: data.error || 'token_invalid', message: data.message || 'Invalid token' };
+  } catch (e) {
+    console.error('[Auth] validate-token network error:', e.message);
+    return { success: false, error: 'network_error', message: e.message };
+  }
+}
+
+async function validateSession(sessionToken) {
+  try {
+    const { status, data } = await apiRequest('GET', '/api/auth/me', null, {
+      'Authorization': `Bearer ${sessionToken}`
+    });
+    if (status === 200 && data.user_id) return { valid: true, ...data };
+    return { valid: false };
+  } catch {
+    return { valid: false };
+  }
+}
+
+async function sendMagicLink(email) {
+  try {
+    const { data } = await apiRequest('POST', '/api/auth/send-magic-link', { email });
+    return data;
+  } catch {
+    return { success: true }; // Fail silently per spec
+  }
 }
 
 // ── Meeting Detection ────────────────────────────────────────────────────────
@@ -373,17 +515,20 @@ let _queuedDeepLink = null;
 app.on('open-url', (event, url) => {
   event.preventDefault();
   console.log('[DeepLink] Received:', url);
-  if (url.startsWith('interviewcoach://start')) {
-    if (!app.isReady() || !mainWindow) {
-      // App not ready yet (cold launch) — queue for whenReady
-      console.log('[DeepLink] Queued for cold launch');
-      _queuedDeepLink = url;
-      return;
-    }
-    // Extract auth params from URL: interviewcoach://start?token=...&user_id=...
+
+  if (!app.isReady() || !mainWindow) {
+    console.log('[DeepLink] Queued for cold launch');
+    _queuedDeepLink = url;
+    return;
+  }
+
+  if (url.startsWith('interviewcoach://activate')) {
+    // First-launch activation flow — validate token with website API
+    handleActivateDeepLink(url);
+  } else if (url.startsWith('interviewcoach://start')) {
+    // Existing flow: web app starts capture
     storeAuthFromURL(url);
     mainWindow?.show();
-    // Small delay to let the app surface before starting capture
     setTimeout(() => {
       startAudioCapture('', '').then(() => {
         console.log('[DeepLink] Audio capture started via URL scheme');
@@ -392,11 +537,70 @@ app.on('open-url', (event, url) => {
   }
 });
 
+async function handleActivateDeepLink(url) {
+  try {
+    const qIdx = url.indexOf('?');
+    if (qIdx === -1) return;
+    const params = new URLSearchParams(url.substring(qIdx));
+    const token = params.get('token');
+    if (!token) {
+      console.warn('[DeepLink] No token in activate URL');
+      mainWindow?.show();
+      mainWindow?.webContents.send('auth-result', { success: false, error: 'missing_token' });
+      return;
+    }
+
+    mainWindow?.show();
+    mainWindow?.webContents.send('auth-loading');
+
+    const result = await validateActivationToken(token);
+    if (result.success) {
+      console.log('[DeepLink] Activation successful for:', result.email);
+      // Store session securely
+      storeSessionToken(result.session_token);
+      // Store profile locally
+      storeUserProfile({
+        user_id: result.user_id,
+        email: result.email,
+        role: result.role,
+        stage: result.stage,
+        first_launch: true
+      });
+      // Also store userId for existing audio capture auth
+      const s = loadSettings();
+      s.userId = result.user_id;
+      saveSettings(s);
+      // Tell renderer to show first-practice screen
+      mainWindow?.webContents.send('auth-result', {
+        success: true,
+        user_id: result.user_id,
+        email: result.email,
+        role: result.role,
+        stage: result.stage,
+        first_launch: true
+      });
+    } else {
+      console.warn('[DeepLink] Activation failed:', result.error);
+      mainWindow?.webContents.send('auth-result', {
+        success: false,
+        error: result.error,
+        message: result.message
+      });
+    }
+  } catch (e) {
+    console.error('[DeepLink] Activation error:', e.message);
+    mainWindow?.webContents.send('auth-result', { success: false, error: 'unexpected', message: e.message });
+  }
+}
+
 // Overlay is created on demand (when user clicks the Overlay button or a coaching card fires)
 // Do NOT auto-create on startup.
 
 app.whenReady().then(async () => {
-  if (process.platform === 'darwin') {
+  const isPreview = process.argv.includes('--preview');
+
+  // Skip permission prompts in preview mode
+  if (!isPreview && process.platform === 'darwin') {
     const mic = systemPreferences.getMediaAccessStatus('microphone');
     if (mic !== 'granted') await systemPreferences.askForMediaAccess('microphone');
     const screen = systemPreferences.getMediaAccessStatus('screen');
@@ -404,35 +608,118 @@ app.whenReady().then(async () => {
   }
   buildMenu();
   createWindow();
-  createTray();
+  if (!isPreview) createTray();
+
+  // ── Preview mode: show a specific screen with mock data, skip all auth ──
+  const previewScreen = isPreview ? '--preview' : null;
+  if (previewScreen) {
+    const screen = process.argv[process.argv.indexOf(previewScreen) + 1] || 'first-practice';
+    const mockProfile = {
+      user_id: 'preview-user',
+      email: 'alex@techsales.com',
+      role: 'enterprise_ae',
+      stage: 'actively_interviewing',
+      first_launch: true
+    };
+    // Override role if passed: --preview first-practice mid_market_ae
+    const roleArg = process.argv[process.argv.indexOf(previewScreen) + 2];
+    if (roleArg && ['sdr_bdr','mid_market_ae','enterprise_ae','se_csm_am','sales_manager_director','vp_plus'].includes(roleArg)) {
+      mockProfile.role = roleArg;
+    }
+    mainWindow.webContents.on('did-finish-load', () => {
+      mainWindow.webContents.send('preview-mode', { screen, profile: mockProfile });
+      mainWindow.webContents.openDevTools({ mode: 'detach' });
+    });
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.setAlwaysOnTop(true);
+    setTimeout(() => mainWindow.setAlwaysOnTop(false), 2000);
+    console.log(`[Preview] Showing "${screen}" screen with role: ${mockProfile.role}`);
+    return; // Skip all auth, meeting detection, deep link handling
+  }
+
   // Overlay created on demand — not on startup
   startLocalServer();
   startMeetingDetection();
 
   // Handle deep link when app was cold-launched via URL scheme.
-  // Check three sources: queued open-url event, process.argv, or delayed open-url.
   const coldLaunchUrl = _queuedDeepLink || process.argv.find(a => a.startsWith('interviewcoach://'));
   _queuedDeepLink = null;
   if (coldLaunchUrl) {
     console.log('[DeepLink] Cold launch via URL scheme:', coldLaunchUrl);
-    storeAuthFromURL(coldLaunchUrl);
-    setTimeout(() => {
-      startAudioCapture('', '').then(() => {
-        console.log('[DeepLink] Audio capture started (cold launch)');
-      }).catch(e => console.error('[DeepLink] Cold start failed:', e.message));
-    }, 1500);
+    if (coldLaunchUrl.startsWith('interviewcoach://activate')) {
+      // First-launch activation — handle via website API
+      handleActivateDeepLink(coldLaunchUrl);
+    } else {
+      // Existing start-capture flow
+      storeAuthFromURL(coldLaunchUrl);
+      setTimeout(() => {
+        startAudioCapture('', '').then(() => {
+          console.log('[DeepLink] Audio capture started (cold launch)');
+        }).catch(e => console.error('[DeepLink] Cold start failed:', e.message));
+      }, 1500);
+    }
   } else {
     // open-url may fire AFTER whenReady on macOS — wait briefly and check
     setTimeout(() => {
       if (_queuedDeepLink) {
-        console.log('[DeepLink] Late cold-launch URL:', _queuedDeepLink);
-        storeAuthFromURL(_queuedDeepLink);
+        const url = _queuedDeepLink;
         _queuedDeepLink = null;
-        startAudioCapture('', '').then(() => {
-          console.log('[DeepLink] Audio capture started (late cold launch)');
-        }).catch(e => console.error('[DeepLink] Late cold start failed:', e.message));
+        console.log('[DeepLink] Late cold-launch URL:', url);
+        if (url.startsWith('interviewcoach://activate')) {
+          handleActivateDeepLink(url);
+        } else {
+          storeAuthFromURL(url);
+          startAudioCapture('', '').then(() => {
+            console.log('[DeepLink] Audio capture started (late cold launch)');
+          }).catch(e => console.error('[DeepLink] Late cold start failed:', e.message));
+        }
+      } else {
+        // No deep link — check for existing session or show login
+        checkSessionOnLaunch();
       }
     }, 2000);
+  }
+
+  async function checkSessionOnLaunch() {
+    const sessionToken = loadSessionToken();
+    if (sessionToken) {
+      // Returning user — validate session
+      console.log('[Auth] Found stored session, validating...');
+      mainWindow?.webContents.send('auth-loading');
+      const result = await validateSession(sessionToken);
+      if (result.valid) {
+        console.log('[Auth] Session valid for:', result.email);
+        storeUserProfile({
+          user_id: result.user_id,
+          email: result.email,
+          role: result.role,
+          stage: result.stage,
+          first_launch: false
+        });
+        mainWindow?.webContents.send('auth-result', {
+          success: true,
+          user_id: result.user_id,
+          email: result.email,
+          role: result.role,
+          stage: result.stage,
+          first_launch: false
+        });
+      } else {
+        console.log('[Auth] Session expired, showing login');
+        clearSessionToken();
+        clearUserProfile();
+        mainWindow?.webContents.send('show-login', { reason: 'session_expired' });
+      }
+    } else {
+      // No session — show login screen
+      const profile = loadUserProfile();
+      if (!profile) {
+        mainWindow?.webContents.send('show-login', {});
+      } else {
+        mainWindow?.webContents.send('show-login', { email: profile.email });
+      }
+    }
   }
 
   // Silent background update check on launch (non-blocking)
@@ -737,6 +1024,31 @@ ipcMain.handle('check-binary', async () => {
 ipcMain.handle('get-settings', async () => loadSettings());
 ipcMain.handle('save-settings', async (event, settings) => {
   saveSettings(settings);
+  return { ok: true };
+});
+
+// ── Auth IPC (first-launch flow) ────────────────────────────────────────────
+
+ipcMain.handle('send-magic-link', async (event, email) => {
+  return sendMagicLink(email);
+});
+
+ipcMain.handle('get-user-profile', async () => {
+  return loadUserProfile();
+});
+
+ipcMain.handle('logout', async () => {
+  clearSessionToken();
+  clearUserProfile();
+  return { ok: true };
+});
+
+ipcMain.handle('mark-onboarded', async () => {
+  const profile = loadUserProfile();
+  if (profile) {
+    profile.first_launch = false;
+    storeUserProfile(profile);
+  }
   return { ok: true };
 });
 

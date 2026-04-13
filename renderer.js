@@ -3,7 +3,7 @@
 // NO getUserMedia, NO AudioContext, NO WebSocket here.
 // All audio happens in the Swift process.
 
-const { ipcRenderer } = require('electron');
+const { ipcRenderer, shell } = require('electron');
 
 let isCapturing = false;
 let startTime   = null;
@@ -15,6 +15,242 @@ try {
   const el = document.getElementById('app-version');
   if (el) el.textContent = 'v' + pkg.version;
 } catch (e) {}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// VIEW ROUTING — manages login → first-practice → main transitions
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const VIEWS = ['view-loading', 'view-login', 'view-waiting', 'view-first-practice', 'view-main'];
+let _currentView = null;
+let _userProfile = null; // { user_id, email, role, stage, first_launch }
+
+function switchView(viewId) {
+  // Normalize: allow passing 'login' or 'view-login'
+  if (!viewId.startsWith('view-')) viewId = 'view-' + viewId;
+  VIEWS.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('active', id === viewId);
+  });
+  _currentView = viewId;
+}
+
+// ── Role → Practice Config Mapping ──────────────────────────────────────────
+
+const ROLE_CONFIG = {
+  sdr_bdr: {
+    display: 'SDR / BDR',
+    round: 'SDR-to-AE Transition Interview',
+    firstQuestion: "You're transitioning from setting meetings to running full-cycle deals. Walk me through a qualified opportunity you sourced and tell me what happened after you handed it off."
+  },
+  mid_market_ae: {
+    display: 'Mid-Market AE',
+    round: 'Hiring Manager Round — Enterprise Role',
+    firstQuestion: "You're interviewing for an enterprise role with $1.5M annual targets. Your current average deal is $85K. How do you convince me you're ready to sell a $300K deal?"
+  },
+  enterprise_ae: {
+    display: 'Enterprise AE',
+    round: 'Hiring Manager Round',
+    firstQuestion: "Walk me through how you displaced an incumbent vendor in an account that had been with them for four years."
+  },
+  se_csm_am: {
+    display: 'SE / CSM / AM',
+    round: 'Career Transition Interview',
+    firstQuestion: "You're moving into a closing role. Tell me about a time you identified expansion revenue in an existing account and drove it to close."
+  },
+  sales_manager_director: {
+    display: 'Sales Manager / Director',
+    round: 'Leadership Interview',
+    firstQuestion: "You're inheriting a team of 8 reps. Three are below 60% attainment. Walk me through your first 90 days."
+  },
+  vp_plus: {
+    display: 'VP+',
+    round: 'Executive Round',
+    firstQuestion: "The board wants to see a path to $50M ARR in 18 months. You have 12 reps today. Walk me through your hiring plan, territory design, and ramp assumptions."
+  }
+};
+
+// ── Preview Mode (--preview flag) — shows screens without auth ───────────────
+
+ipcRenderer.on('preview-mode', (event, { screen, profile }) => {
+  console.log('[Preview] Renderer received preview-mode:', screen, profile);
+  _userProfile = profile;
+  if (screen === 'login') {
+    switchView('login');
+  } else if (screen === 'first-practice') {
+    showFirstPractice(profile);
+  } else if (screen === 'waiting') {
+    document.getElementById('waiting-email').textContent = profile.email;
+    switchView('waiting');
+  } else if (screen === 'main') {
+    showMainView(profile);
+  }
+});
+
+// ── Auth Events from Main Process ────────────────────────────────────────────
+
+ipcRenderer.on('auth-loading', () => {
+  switchView('loading');
+});
+
+ipcRenderer.on('auth-result', (event, result) => {
+  if (result.success) {
+    _userProfile = result;
+    if (result.first_launch) {
+      showFirstPractice(result);
+    } else {
+      showMainView(result);
+    }
+  } else {
+    // Auth failed — show login with appropriate message
+    switchView('login');
+    if (result.error === 'token_invalid' || result.error === 'missing_token') {
+      showLoginNotice('That link has expired. Enter your email to get a new one.');
+    } else if (result.error === 'network_error') {
+      showLoginNotice('Couldn\'t connect. Check your internet and try again.');
+    }
+  }
+});
+
+ipcRenderer.on('show-login', (event, data) => {
+  switchView('login');
+  if (data.reason === 'session_expired') {
+    showLoginNotice('Your session expired. Enter your email to sign in again.');
+  }
+  if (data.email) {
+    const emailInput = document.getElementById('login-email');
+    if (emailInput) emailInput.value = data.email;
+  }
+});
+
+function showLoginNotice(text) {
+  const notice = document.getElementById('login-notice');
+  if (notice) {
+    notice.textContent = text;
+    notice.style.display = 'block';
+  }
+}
+
+function showFirstPractice(profile) {
+  const config = ROLE_CONFIG[profile.role] || ROLE_CONFIG.enterprise_ae;
+  const roleEl = document.getElementById('fp-role');
+  const roundEl = document.getElementById('fp-round');
+  const emailEl = document.getElementById('fp-email');
+  if (roleEl) roleEl.textContent = config.display;
+  if (roundEl) roundEl.textContent = config.round;
+  if (emailEl) emailEl.textContent = profile.email;
+  switchView('first-practice');
+}
+
+function showMainView(profile) {
+  switchView('main');
+  // Update auth status in main view
+  if (profile) {
+    const statusEl = document.getElementById('auth-status');
+    if (statusEl) {
+      statusEl.textContent = profile.email || 'Authenticated';
+      statusEl.style.color = '#4ade80';
+    }
+  }
+}
+
+// ── Magic Link Flow ─────────────────────────────────────────────────────────
+
+let _magicLinkEmail = '';
+let _resendTimer = null;
+let _fallbackTimer = null;
+
+async function onSendMagicLink() {
+  const emailInput = document.getElementById('login-email');
+  const email = emailInput ? emailInput.value.trim() : '';
+  if (!email || !email.includes('@')) {
+    emailInput?.focus();
+    return;
+  }
+
+  const btn = document.getElementById('login-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending...'; }
+
+  await ipcRenderer.invoke('send-magic-link', email);
+
+  if (btn) { btn.disabled = false; btn.textContent = 'Send Login Link'; }
+
+  _magicLinkEmail = email;
+  const waitingEmail = document.getElementById('waiting-email');
+  if (waitingEmail) waitingEmail.textContent = email;
+
+  // Reset timers
+  clearTimeout(_resendTimer);
+  clearTimeout(_fallbackTimer);
+  const resendBtn = document.getElementById('btn-resend');
+  const fallbackEl = document.getElementById('waiting-fallback');
+  if (resendBtn) resendBtn.style.display = 'none';
+  if (fallbackEl) fallbackEl.style.display = 'none';
+
+  switchView('waiting');
+
+  // Show resend after 30s
+  _resendTimer = setTimeout(() => {
+    if (resendBtn) resendBtn.style.display = 'block';
+  }, 30000);
+
+  // Show signup fallback after 60s
+  _fallbackTimer = setTimeout(() => {
+    if (fallbackEl) fallbackEl.style.display = 'block';
+  }, 60000);
+}
+
+async function onResendMagicLink() {
+  if (_magicLinkEmail) {
+    const resendBtn = document.getElementById('btn-resend');
+    if (resendBtn) resendBtn.textContent = 'Sending...';
+    await ipcRenderer.invoke('send-magic-link', _magicLinkEmail);
+    if (resendBtn) { resendBtn.textContent = 'Resend link'; resendBtn.style.display = 'none'; }
+    // Reset the 30s timer
+    clearTimeout(_resendTimer);
+    _resendTimer = setTimeout(() => {
+      if (resendBtn) resendBtn.style.display = 'block';
+    }, 30000);
+  }
+}
+
+// Allow Enter key to submit login
+window.addEventListener('DOMContentLoaded', () => {
+  const emailInput = document.getElementById('login-email');
+  if (emailInput) {
+    emailInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') onSendMagicLink();
+    });
+  }
+});
+
+// ── First Practice Launch ───────────────────────────────────────────────────
+
+async function onStartFirstPractice() {
+  if (!_userProfile) return;
+
+  // Mark as onboarded so next launch goes to main
+  await ipcRenderer.invoke('mark-onboarded');
+
+  // Open the Interview Coach web app in the default browser
+  const appUrl = 'https://interviewcoach-production.up.railway.app';
+  shell.openExternal(appUrl);
+
+  // Auto-start audio capture so the user is ready to practice
+  try {
+    await ipcRenderer.invoke('start-capture', { prospectName: '', prospectCompany: '' });
+  } catch (e) {
+    console.warn('[Practice] Audio capture start failed:', e.message);
+  }
+
+  // Move Electron to main view (tray/capture controls)
+  showMainView(_userProfile);
+}
+
+async function onSkipToMain() {
+  await ipcRenderer.invoke('mark-onboarded');
+  showMainView(_userProfile);
+  shell.openExternal('https://interviewcoach-production.up.railway.app');
+}
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
@@ -40,6 +276,19 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   // Show auth status
   updateAuthStatus(s);
+
+  // Always start on loading — main process determines which screen via IPC.
+  // The main process will send either 'auth-result', 'show-login', or handle
+  // a deep link. If nothing arrives within 5s, fall back to login.
+  if (!_currentView) {
+    switchView('loading');
+    setTimeout(() => {
+      if (_currentView === 'view-loading') {
+        // Main process didn't respond — show login as safe default
+        switchView('login');
+      }
+    }, 5000);
+  }
 });
 
 async function onAutoStartToggle() {
