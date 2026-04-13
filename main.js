@@ -4,7 +4,39 @@ const { spawn, exec } = require('child_process');
 const path = require('path');
 const fs   = require('fs');
 const http = require('http');
+const https = require('https');
 const crypto = require('crypto');
+
+// Small helper: POST JSON to a URL using native https/http, returns {status, body}
+function postJson(targetUrl, bodyObj) {
+  return new Promise((resolve, reject) => {
+    try {
+      const u = new URL(targetUrl);
+      const lib = u.protocol === 'https:' ? https : http;
+      const data = JSON.stringify(bodyObj);
+      const req = lib.request({
+        method: 'POST',
+        hostname: u.hostname,
+        port: u.port || (u.protocol === 'https:' ? 443 : 80),
+        path: u.pathname + u.search,
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(data)
+        }
+      }, (res) => {
+        let chunks = '';
+        res.on('data', (c) => chunks += c);
+        res.on('end', () => {
+          try { resolve({ status: res.statusCode, body: JSON.parse(chunks) }); }
+          catch (e) { resolve({ status: res.statusCode, body: chunks }); }
+        });
+      });
+      req.on('error', reject);
+      req.write(data);
+      req.end();
+    } catch (e) { reject(e); }
+  });
+}
 
 let mainWindow;
 let overlayWindow = null;
@@ -969,33 +1001,29 @@ function startLocalServer() {
         // Validate launch token by calling back to IC server
         // (avoids shipping BRIDGE_JWT_SECRET to the client)
         try {
-          const validateRes = await fetch(`${IC_SERVER}/api/launch-token/validate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ launchToken: data.launchToken })
-          });
+          const { status, body } = await postJson(
+            `${IC_SERVER}/api/launch-token/validate`,
+            { launchToken: data.launchToken }
+          );
 
-          if (!validateRes.ok) {
-            const err = await validateRes.json().catch(() => ({}));
-            console.warn(`[LocalServer] Launch validation failed: ${err.error || validateRes.status}`);
-            return sendJson(401, { error: err.error || 'invalid_launch_token' });
+          if (status !== 200) {
+            console.warn(`[LocalServer] Launch validation failed: status=${status} body=${JSON.stringify(body)}`);
+            return sendJson(401, { error: (body && body.error) || 'invalid_launch_token' });
           }
 
-          const payload = await validateRes.json();
-
           _preparedLaunch = {
-            launchId: payload.launchId,
-            userId: payload.userId,
-            role: payload.role,
-            callType: payload.callType,
+            launchId: body.launchId,
+            userId: body.userId,
+            role: body.role,
+            callType: body.callType,
             preparedAt: Date.now()
           };
 
-          console.log(`[LocalServer] Prepared launch=${payload.launchId} role=${payload.role}`);
-          sendJson(200, { status: 'prepared', launchId: payload.launchId });
+          console.log(`[LocalServer] Prepared launch=${body.launchId} role=${body.role}`);
+          sendJson(200, { status: 'prepared', launchId: body.launchId });
         } catch (e) {
-          console.error('[LocalServer] Launch validation error:', e.message);
-          sendJson(500, { error: 'validation_failed' });
+          console.error('[LocalServer] Launch validation error:', e.message, e.stack);
+          sendJson(500, { error: 'validation_failed', message: e.message });
         }
       });
       return;
