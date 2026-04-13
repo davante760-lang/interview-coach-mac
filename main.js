@@ -48,6 +48,7 @@ let _needsRestart = false;
 
 // ── Website API Base URL ─────────────────────────────────────────────────────
 const WEBSITE_API_BASE = 'https://interviewwebsite-production.up.railway.app';
+const IC_SERVER = process.env.IC_SERVER_URL || 'https://interview-coach-production-9c63.up.railway.app';
 
 // ── Dev: --reset flag clears all auth data for clean testing ─────────────────
 if (process.argv.includes('--reset')) {
@@ -621,7 +622,6 @@ async function handleActivateDeepLink(url) {
   console.log('[DeepLink] Activating via auth bridge...');
 
   // Hit the auth bridge on the Interview Coach server
-  const IC_SERVER = process.env.IC_SERVER_URL || 'https://interview-coach-production-9c63.up.railway.app';
 
   try {
     const response = await new Promise((resolve, reject) => {
