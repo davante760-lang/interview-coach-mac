@@ -469,7 +469,7 @@ function updateTrayMenu(isRecording = false) {
     { label: status, enabled: false },
     { type: 'separator' },
     { label: 'Open in Browser', click: () => {
-      require('electron').shell.openExternal('https://interviewcoach-production.up.railway.app');
+      require('electron').shell.openExternal('https://interview-coach-production-9c63.up.railway.app');
     }},
     { label: 'Check for Updates', click: () => autoUpdater.checkForUpdates() },
     { type: 'separator' },
@@ -589,7 +589,7 @@ async function handleActivateDeepLink(url) {
   console.log('[DeepLink] Activating via auth bridge...');
 
   // Hit the auth bridge on the Interview Coach server
-  const IC_SERVER = process.env.IC_SERVER_URL || 'https://interviewcoach-production.up.railway.app';
+  const IC_SERVER = process.env.IC_SERVER_URL || 'https://interview-coach-production-9c63.up.railway.app';
 
   try {
     const response = await new Promise((resolve, reject) => {
@@ -887,7 +887,7 @@ ipcMain.handle('start-capture', async (event, { prospectName, prospectCompany })
 
 function startLocalServer() {
   const ALLOWED_ORIGINS = [
-    'https://interviewcoach-production.up.railway.app',
+    'https://interview-coach-production-9c63.up.railway.app',
     'http://localhost:3000',
     'http://localhost:4173',
     'http://localhost:5173'
