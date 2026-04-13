@@ -963,24 +963,25 @@ function startLocalServer() {
 
     // POST /prepare — validate launch token, arm for capture
     if (req.method === 'POST' && req.url === '/prepare') {
-      readBody().then(data => {
+      readBody().then(async (data) => {
         if (!data.launchToken) return sendJson(400, { error: 'missing_launch_token' });
 
-        // Validate launch token (HMAC-SHA256)
+        // Validate launch token by calling back to IC server
+        // (avoids shipping BRIDGE_JWT_SECRET to the client)
         try {
-          const [headerB64, payloadB64, signatureB64] = data.launchToken.split('.');
-          const LAUNCH_SECRET = process.env.BRIDGE_JWT_SECRET || 'dev-bridge-secret';
-          const expectedSig = crypto
-            .createHmac('sha256', LAUNCH_SECRET)
-            .update(`${headerB64}.${payloadB64}`)
-            .digest('base64url');
+          const validateRes = await fetch(`${IC_SERVER}/api/launch-token/validate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ launchToken: data.launchToken })
+          });
 
-          if (expectedSig !== signatureB64) return sendJson(401, { error: 'invalid_launch_token' });
-
-          const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString());
-          if (payload.exp && Date.now() / 1000 > payload.exp) {
-            return sendJson(401, { error: 'launch_token_expired' });
+          if (!validateRes.ok) {
+            const err = await validateRes.json().catch(() => ({}));
+            console.warn(`[LocalServer] Launch validation failed: ${err.error || validateRes.status}`);
+            return sendJson(401, { error: err.error || 'invalid_launch_token' });
           }
+
+          const payload = await validateRes.json();
 
           _preparedLaunch = {
             launchId: payload.launchId,
@@ -993,7 +994,8 @@ function startLocalServer() {
           console.log(`[LocalServer] Prepared launch=${payload.launchId} role=${payload.role}`);
           sendJson(200, { status: 'prepared', launchId: payload.launchId });
         } catch (e) {
-          sendJson(401, { error: 'invalid_launch_token' });
+          console.error('[LocalServer] Launch validation error:', e.message);
+          sendJson(500, { error: 'validation_failed' });
         }
       });
       return;
