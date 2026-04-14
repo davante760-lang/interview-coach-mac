@@ -413,6 +413,28 @@ autoUpdater.autoInstallOnAppQuit = true;
 // For unsigned builds — allow updates without code signing verification
 autoUpdater.allowDowngrade = false;
 
+// Track whether an update is downloaded and waiting to install. We deliberately
+// NEVER auto-restart mid-session or between back-to-back interviews. When an
+// update finishes downloading, the tray menu gains an "Install Update & Restart"
+// entry so the user triggers install on their own terms. On a clean quit,
+// autoInstallOnAppQuit = true handles the install transparently.
+let _updateReady = false;
+let _updateVersion = null;
+
+function _installUpdateAndRestart() {
+  if (!_updateReady) return;
+  console.log(`[Updater] User-triggered install of v${_updateVersion}`);
+  showNotification('Interview Coach updating', `Installing v${_updateVersion}. The app will restart momentarily.`);
+  setTimeout(() => {
+    try {
+      // isSilent=true, isForceRunAfter=true → quit, install, relaunch without dialog
+      autoUpdater.quitAndInstall(true, true);
+    } catch (err) {
+      console.log('[Updater] quitAndInstall failed (will fall back to quit-install on next quit):', err.message);
+    }
+  }, 1500);
+}
+
 autoUpdater.on('checking-for-update', () => {
   console.log('[Updater] Checking for update...');
 });
@@ -432,7 +454,18 @@ autoUpdater.on('download-progress', (progress) => {
 
 autoUpdater.on('update-downloaded', (info) => {
   console.log('[Updater] Update downloaded:', info.version);
+  _updateReady = true;
+  _updateVersion = info.version;
   try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('update-downloaded', info.version); } catch (_) {}
+  // Surface a non-blocking notification + rebuild tray so the user can click
+  // "Install Update & Restart" whenever they're between sessions and actually
+  // ready to restart. Never auto-restart — that risks interrupting an active
+  // session or a user who is about to start their next interview.
+  showNotification(
+    `Update v${info.version} ready`,
+    'Click the Interview Coach tray icon → Install Update & Restart when you are ready.'
+  );
+  try { updateTrayMenu(!!audioProcess); } catch (_) {}
 });
 
 autoUpdater.on('error', (err) => {
@@ -507,17 +540,30 @@ function updateTrayMenu(isRecording = false) {
   const companionToken = loadCompanionToken();
   const status = isRecording ? '🔴 Recording' : (companionToken ? '✓ Ready' : '⚠ Not signed in');
 
-  const contextMenu = Menu.buildFromTemplate([
+  const template = [
     { label: status, enabled: false },
     { type: 'separator' },
     { label: 'Open in Browser', click: () => {
       require('electron').shell.openExternal('https://interview-coach-production-9c63.up.railway.app');
     }},
-    { label: 'Check for Updates', click: () => autoUpdater.checkForUpdates() },
+    { label: 'Check for Updates', click: () => autoUpdater.checkForUpdates() }
+  ];
+
+  if (_updateReady) {
+    template.push({ type: 'separator' });
+    template.push({
+      label: `Install Update v${_updateVersion || ''} & Restart`,
+      click: _installUpdateAndRestart
+    });
+  }
+
+  template.push(
     { type: 'separator' },
     { label: 'Settings', click: () => { mainWindow?.show(); } },
     { label: 'Quit', click: () => { app.isQuitting = true; app.quit(); } }
-  ]);
+  );
+
+  const contextMenu = Menu.buildFromTemplate(template);
   tray.setContextMenu(contextMenu);
 }
 
@@ -782,11 +828,15 @@ app.whenReady().then(async () => {
   startMeetingDetection();
 
   // Silent background update check on launch (non-blocking)
-  setTimeout(() => {
-    autoUpdater.checkForUpdates().catch(err => {
-      console.log('[Updater] Background check failed (non-fatal):', err.message);
-    });
-  }, 5000);
+  const runUpdateCheck = (reason) => {
+    autoUpdater.checkForUpdates()
+      .then(res => { if (res) console.log(`[Updater] Check (${reason}) ok`); })
+      .catch(err => console.log(`[Updater] Check (${reason}) failed (non-fatal):`, err.message));
+  };
+  setTimeout(() => runUpdateCheck('launch'), 5000);
+  // Recheck every 30 min so long-running tray instances actually pick up
+  // releases published after the app started.
+  setInterval(() => runUpdateCheck('interval'), 30 * 60 * 1000);
 });
 
 app.on('window-all-closed', () => { /* stay alive in tray */ });
