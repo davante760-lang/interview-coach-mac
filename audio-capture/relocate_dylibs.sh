@@ -62,6 +62,12 @@ while [ $added -gt 0 ]; do
   done
 done
 
+# Homebrew ships its dylibs as 444 (read-only). `cp -p` preserves that mode,
+# and Squirrel.Mac (electron-updater) then fails to strip `com.apple.quarantine`
+# from the extracted update ZIP with "Permission denied" → every auto-update
+# aborts. Force them writable so xattr removal works on the user's machine.
+chmod u+w "$DEST"/*.dylib
+
 echo "==> Rewriting install names in bundled dylibs"
 for f in "$DEST"/*.dylib; do
   # Self-id → @rpath/<basename>
