@@ -1,6 +1,6 @@
 {
   "name": "interview-coach-desktop",
-  "version": "2.4.3",
+  "version": "2.5.5",
   "description": "Captures system audio via ScreenCaptureKit and streams to Interview Coach",
   "main": "main.js",
   "scripts": {
@@ -67,6 +67,13 @@
       {
         "from": "AudioCapture",
         "to": "MacOS/AudioCapture"
+      },
+      {
+        "from": "aec_libs",
+        "to": "MacOS/aec_libs",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "publish": {

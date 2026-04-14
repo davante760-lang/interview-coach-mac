@@ -854,7 +854,31 @@ function storeAuthFromPayload(payload) {
   if (payload.desktopToken) console.log('[Auth] Desktop token stored for auto-detect');
 }
 
+// Bring the main window to the foreground and route the renderer to view-main
+// so the user sees live transcripts + connection status while capturing.
+// Idempotent — safe to call from every capture entry point.
+function showMainWindowForCapture() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    const send = () => { try { mainWindow.webContents.send('show-main'); } catch (_) {} };
+    if (mainWindow.webContents.isLoading()) {
+      mainWindow.webContents.once('did-finish-load', send);
+    } else {
+      send();
+    }
+    mainWindow.show();
+    mainWindow.focus();
+  } catch (e) {
+    console.warn('[Main] showMainWindowForCapture failed:', e.message);
+  }
+}
+
 function startAudioCapture(prospectName, prospectCompany) {
+  // Always pop the troubleshooting window — live transcripts + WS status give
+  // the user instant feedback on whether capture is healthy before they start
+  // speaking. Idempotent on re-entry.
+  showMainWindowForCapture();
+
   if (audioProcess) return Promise.resolve({ ok: true, already: true });
   console.log('[Main] Spawning:', BINARY_PATH);
 
@@ -866,9 +890,19 @@ function startAudioCapture(prospectName, prospectCompany) {
     stdio: ['pipe', 'pipe', 'pipe']
   });
 
+  // Write Swift stderr to a rotating debug log under ~/Library/Logs so we can
+  // inspect AEC diagnostics after a session. Gated by env for zero overhead
+  // when the user isn't actively debugging.
+  const IC_LOG_DIR = path.join(app.getPath('logs'));
+  try { fs.mkdirSync(IC_LOG_DIR, { recursive: true }); } catch (_) {}
+  const swiftLogPath = path.join(IC_LOG_DIR, 'audio-capture.log');
+  const swiftLogStream = fs.createWriteStream(swiftLogPath, { flags: 'a' });
+  swiftLogStream.write(`\n\n=== session start ${new Date().toISOString()} ===\n`);
+
   audioProcess.stderr.on('data', (data) => {
     const line = data.toString().trim();
     console.log('[Swift]', line);
+    try { swiftLogStream.write(line + '\n'); } catch (_) {}
     try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('audio-log', line); } catch (_) {}
   });
 

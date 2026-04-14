@@ -15,15 +15,11 @@ APP_NAME="Interview Coach Audio"
 
 echo "=== Building Interview Coach v${VERSION} ==="
 
-# Step 1: Compile Swift binary
-echo "→ Compiling AudioCapture..."
-swiftc -O \
-  -framework ScreenCaptureKit \
-  -framework CoreMedia \
-  -framework AVFAudio \
-  -framework AudioToolbox \
-  -framework CoreAudio \
-  AudioCapture.swift -o AudioCapture
+# Step 1: Compile Swift binary + ObjC++ AEC wrapper, then relocate dylibs
+echo "→ Compiling AudioCapture (Swift + WebRTC AEC3)..."
+bash audio-capture/build.sh
+echo "→ Relocating native dylibs into aec_libs/..."
+bash audio-capture/relocate_dylibs.sh
 
 # Step 2: Update version in package.json
 node -e "

@@ -64,6 +64,22 @@ ipcRenderer.on('show-login', () => {
   switchView('setup');
 });
 
+// Main process is about to start (or has started) an audio capture session —
+// make sure we're on the capture view so the user can see live transcripts
+// and connection status flowing in. Fired from main.js startAudioCapture(),
+// which covers both user-driven and web-app-driven (/commit-start) paths.
+ipcRenderer.on('show-main', () => {
+  showMainView(_userProfile);
+  // Flip the capture UI so the transcripts panel + stats are visible.
+  // Harmless if already capturing (idempotent).
+  if (!isCapturing) {
+    isCapturing = true;
+    startTime = Date.now();
+    startTimer();
+  }
+  updateUI('capturing');
+});
+
 function updatePermissionUI(mic, screen) {
   const micEl = document.getElementById('perm-mic');
   const screenEl = document.getElementById('perm-screen');

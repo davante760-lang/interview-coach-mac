@@ -214,14 +214,89 @@ class DeepgramWS {
     }
 }
 
+// MARK: - Shared Echo Canceller (AEC3 via WebRTC AudioProcessing)
+
+// Single APM instance — reverse (system audio) and capture (mic) both flow
+// through it. APM is not thread-safe between streams, so all calls are
+// serialized on `aecQueue`.
+let echoCanceller: ICEchoCanceller? = {
+    let c = ICEchoCanceller()
+    if let c = c {
+        // Typical MacBook speaker→mic acoustic delay is ~100-150ms once you
+        // sum CoreAudio output buffer + speaker emission + air + mic buffer.
+        // AEC3's delay estimator adapts from this starting hint — set too low
+        // and the estimator wanders, hurting initial convergence.
+        c.setStreamDelayMs(120)
+        fputs("[AEC] WebRTC AEC3 initialized\n", stderr)
+    } else {
+        fputs("[AEC] WebRTC AEC3 FAILED to initialize — falling back to raw audio\n", stderr)
+    }
+    return c
+}()
+let aecQueue = DispatchQueue(label: "ic.aec.serial", qos: .userInteractive)
+
+// 48 kHz mono, 10 ms frames = 480 int16 samples per frame.
+let kAecFrameSamples = 480
+
+// MARK: - TTS gate (authoritative echo defense)
+//
+// Linear AEC alone on MacBook speakers leaves intelligible residual that
+// Deepgram happily transcribes back as candidate speech. The reliable fix is
+// to simply not send mic frames to Deepgram while the AI is physically
+// speaking through the laptop speakers. The web app emits onplay/onended
+// events on the TTS <audio> element; Railway forwards them to us as
+// {type:"tts_state", playing:bool}. We hard-gate the mic during those
+// windows with a 150ms hangover to catch speaker decay.
+final class TTSGate {
+    private let q = DispatchQueue(label: "ic.ttsgate", qos: .userInteractive)
+    private var _active = false
+    private var _hangoverUntil: CFAbsoluteTime = 0
+    private let hangoverSeconds: Double = 0.15
+
+    var isGated: Bool {
+        q.sync {
+            if _active { return true }
+            return CFAbsoluteTimeGetCurrent() < _hangoverUntil
+        }
+    }
+
+    func setActive(_ playing: Bool, utteranceId: String?) {
+        q.sync {
+            if playing {
+                _active = true
+                _hangoverUntil = 0
+                fputs("[TTSGate] engaged (utt=\(utteranceId ?? "-"))\n", stderr)
+            } else {
+                _active = false
+                _hangoverUntil = CFAbsoluteTimeGetCurrent() + hangoverSeconds
+                fputs("[TTSGate] released (utt=\(utteranceId ?? "-")) — hangover \(Int(hangoverSeconds*1000))ms\n", stderr)
+            }
+        }
+    }
+}
+
+let ttsGate = TTSGate()
+
+// Boxcar 3:1 downsample from 48 kHz int16 mono → 16 kHz int16 mono.
+// `input.count` must be a multiple of 3.
+@inline(__always)
+func downsample48to16(_ input: UnsafePointer<Int16>, count: Int, output: UnsafeMutablePointer<Int16>) {
+    let outCount = count / 3
+    for i in 0..<outCount {
+        let a = Int32(input[i * 3])
+        let b = Int32(input[i * 3 + 1])
+        let c = Int32(input[i * 3 + 2])
+        output[i] = Int16(clamping: (a + b + c) / 3)
+    }
+}
+
 // MARK: - Audio Delegate (SAFE: uses CMBlockBufferCopyDataBytes, never AudioBufferList)
 
 @available(macOS 13.0, *)
 class AudioDelegate: NSObject, SCStreamOutput, SCStreamDelegate {
     let railway: RailwayWS
     let deepgram: DeepgramWS
-    private var accum = Data()
-    private let chunkBytes = 8192 // 4096 int16 samples * 2 bytes
+    private let chunkBytes = 8192 // 4096 int16 samples * 2 bytes @ 16 kHz
     private var sent = 0
 
     init(railway: RailwayWS, deepgram: DeepgramWS) {
@@ -237,6 +312,11 @@ class AudioDelegate: NSObject, SCStreamOutput, SCStreamDelegate {
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         fputs("[SC] stopped: \(error)\n", stderr)
     }
+
+    // 48 kHz int16 mono frame accumulator (fed to AEC as "reverse" reference).
+    private var pcm48 = Data()
+    // 16 kHz int16 mono chunk accumulator (sent to Deepgram + Railway).
+    private var chunk16 = Data()
 
     private func processAudio(_ buf: CMSampleBuffer) {
         // SAFE: get the block buffer and copy bytes out — no AudioBufferList pointers
@@ -257,16 +337,13 @@ class AudioDelegate: NSObject, SCStreamOutput, SCStreamDelegate {
         let numFrames = CMSampleBufferGetNumSamples(buf)
         guard numFrames > 0 else { return }
 
-        // SCStream delivers float32 mono (channelCount=1)
-        // Downsample 48kHz -> 16kHz = take every 3rd frame
-        let dsRatio = 3
-
+        // SCStream delivers 48 kHz float32 (typically mono). Convert to
+        // int16 at 48 kHz — full rate, NO decimation. AEC needs 48 kHz input.
         rawData.withUnsafeBytes { rawPtr in
             guard let floats = rawPtr.baseAddress?.assumingMemoryBound(to: Float32.self) else { return }
             let totalFloats = totalBytes / 4
 
-            var frameIdx = 0
-            while frameIdx < numFrames {
+            for frameIdx in 0..<numFrames {
                 var mono: Float32 = 0
                 if srcChannels == 1 {
                     if frameIdx < totalFloats { mono = floats[frameIdx] }
@@ -277,18 +354,47 @@ class AudioDelegate: NSObject, SCStreamOutput, SCStreamDelegate {
                     }
                     mono /= Float32(srcChannels)
                 }
-
                 let clamped = max(-1.0, min(1.0, mono))
                 var val = Int16(clamped < 0 ? clamped * 32768 : clamped * 32767).littleEndian
-                accum.append(Data(bytes: &val, count: 2))
-
-                frameIdx += dsRatio
+                pcm48.append(Data(bytes: &val, count: 2))
             }
         }
 
-        while accum.count >= chunkBytes {
-            let chunk = accum.prefix(chunkBytes)
-            accum.removeFirst(chunkBytes)
+        // Slice 48 kHz accumulator into 480-sample (960-byte) AEC frames.
+        let frameBytes = kAecFrameSamples * 2
+        while pcm48.count >= frameBytes {
+            let frame = pcm48.prefix(frameBytes)
+            pcm48.removeFirst(frameBytes)
+
+            // Make a heap copy the AEC queue can own.
+            let frameData = Data(frame)
+
+            // 1) Feed to AEC as reverse/reference signal.
+            if let ec = echoCanceller {
+                aecQueue.async {
+                    frameData.withUnsafeBytes { raw in
+                        guard let p = raw.baseAddress?.assumingMemoryBound(to: Int16.self) else { return }
+                        ec.processReverseFrame(p)
+                    }
+                }
+            }
+
+            // 2) Downsample 48 kHz → 16 kHz for Deepgram (system-audio transcript).
+            var ds = Data(count: (kAecFrameSamples / 3) * 2)
+            ds.withUnsafeMutableBytes { outRaw in
+                guard let outPtr = outRaw.baseAddress?.assumingMemoryBound(to: Int16.self) else { return }
+                frameData.withUnsafeBytes { inRaw in
+                    guard let inPtr = inRaw.baseAddress?.assumingMemoryBound(to: Int16.self) else { return }
+                    downsample48to16(inPtr, count: kAecFrameSamples, output: outPtr)
+                }
+            }
+            chunk16.append(ds)
+        }
+
+        // Ship 16 kHz chunks in 8192-byte pieces (Deepgram + Railway).
+        while chunk16.count >= chunkBytes {
+            let chunk = chunk16.prefix(chunkBytes)
+            chunk16.removeFirst(chunkBytes)
             deepgram.sendAudio(Data(chunk))
             // Tag system audio with 0x01 prefix for server-side recording
             var tagged = Data([0x01])
@@ -309,8 +415,11 @@ class MicCapture {
     private var engine = AVAudioEngine()
     private let deepgram: DeepgramWS
     private let railway: RailwayWS
-    private var accum = Data()
-    private let chunkBytes = 8192
+    // 48 kHz int16 mono buffer fed into AEC as capture (near-end) signal.
+    fileprivate var pcm48 = Data()
+    // 16 kHz int16 mono buffer sent to Deepgram after AEC + downsample.
+    fileprivate var chunk16 = Data()
+    fileprivate let chunkBytes = 8192
     private var sent = 0
     private var running = false
     private var deviceChangeObserver: NSObjectProtocol?
@@ -429,21 +538,20 @@ class MicCapture {
             return
         }
 
-        // Proper resampling to 16 kHz mono int16 using AVAudioConverter.
-        // Previous code used integer division which broke at non-integer ratios
-        // (e.g. AirPods Max at 24 kHz → Int(24000/16000)=1 → no downsample → garbled).
+        // Resample hardware rate → 48 kHz int16 mono (AEC's native rate).
+        // After AEC processing we boxcar-downsample 48→16 kHz for Deepgram.
         guard let targetFormat = AVAudioFormat(commonFormat: .pcmFormatInt16,
-                                               sampleRate: 16000,
+                                               sampleRate: 48000,
                                                channels: 1,
                                                interleaved: true) else {
-            fputs("[Mic] Failed to create 16k target format\n", stderr)
+            fputs("[Mic] Failed to create 48k target format\n", stderr)
             return
         }
         guard let converter = AVAudioConverter(from: hwFormat, to: targetFormat) else {
-            fputs("[Mic] Failed to create AVAudioConverter \(hwFormat) → 16k mono\n", stderr)
+            fputs("[Mic] Failed to create AVAudioConverter \(hwFormat) → 48k mono\n", stderr)
             return
         }
-        fputs("[Mic] Resampler: \(hwFormat.sampleRate)Hz \(hwFormat.channelCount)ch → 16000Hz 1ch\n", stderr)
+        fputs("[Mic] Resampler: \(hwFormat.sampleRate)Hz \(hwFormat.channelCount)ch → 48000Hz 1ch (AEC input)\n", stderr)
 
         var tapCallCount = 0
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: hwFormat) { [weak self] buffer, _ in
@@ -483,26 +591,71 @@ class MicCapture {
             }
             let n = Int(outBuf.frameLength)
             if tapCallCount <= 3 {
-                fputs("[Mic] tap#\(tapCallCount) converted outFrames=\(n)\n", stderr)
+                fputs("[Mic] tap#\(tapCallCount) converted outFrames=\(n) @ 48kHz\n", stderr)
             }
             if n == 0 {
                 return
             }
-            let byteCount = n * 2
-            let data = Data(bytes: UnsafeRawPointer(int16ptr), count: byteCount)
-            self.accum.append(data)
+            // Accumulate 48 kHz int16 mono (AEC input rate).
+            let data = Data(bytes: UnsafeRawPointer(int16ptr), count: n * 2)
+            self.pcm48.append(data)
 
-            while self.accum.count >= self.chunkBytes {
-                let chunk = self.accum.prefix(self.chunkBytes)
-                self.accum.removeFirst(self.chunkBytes)
-                self.deepgram.sendAudio(Data(chunk))
+            // Slice into 480-sample (10 ms) AEC frames.
+            let frameBytes = kAecFrameSamples * 2
+            while self.pcm48.count >= frameBytes {
+                let frame = self.pcm48.prefix(frameBytes)
+                self.pcm48.removeFirst(frameBytes)
+                let frameData = Data(frame)
+
+                // Synchronously run AEC on the serial queue so we get cleaned output back.
+                var cleaned = Data(count: frameBytes)
+                if let ec = echoCanceller {
+                    aecQueue.sync {
+                        frameData.withUnsafeBytes { inRaw in
+                            guard let inPtr = inRaw.baseAddress?.assumingMemoryBound(to: Int16.self) else { return }
+                            cleaned.withUnsafeMutableBytes { outRaw in
+                                guard let outPtr = outRaw.baseAddress?.assumingMemoryBound(to: Int16.self) else { return }
+                                _ = ec.processCaptureFrame(inPtr, output: outPtr)
+                            }
+                        }
+                    }
+                } else {
+                    cleaned = frameData // AEC unavailable — fall through with raw mic
+                }
+
+                // Downsample cleaned 48 kHz → 16 kHz for Deepgram.
+                var ds = Data(count: (kAecFrameSamples / 3) * 2)
+                ds.withUnsafeMutableBytes { outRaw in
+                    guard let outPtr = outRaw.baseAddress?.assumingMemoryBound(to: Int16.self) else { return }
+                    cleaned.withUnsafeBytes { inRaw in
+                        guard let inPtr = inRaw.baseAddress?.assumingMemoryBound(to: Int16.self) else { return }
+                        downsample48to16(inPtr, count: kAecFrameSamples, output: outPtr)
+                    }
+                }
+                self.chunk16.append(ds)
+            }
+
+            // Ship 16 kHz chunks in 8192-byte pieces.
+            while self.chunk16.count >= self.chunkBytes {
+                let chunk = self.chunk16.prefix(self.chunkBytes)
+                self.chunk16.removeFirst(self.chunkBytes)
+
+                // TTS gate: while the AI is physically speaking through the
+                // laptop speakers, replace mic audio with silence. Still send
+                // it — Deepgram needs continuous audio or the WS closes, and
+                // AEC needs to keep training on the real mic signal upstream
+                // of here. Silence frames to Deepgram just transcribe as
+                // nothing, which is exactly what we want.
+                let gated = ttsGate.isGated
+                let outChunk: Data = gated ? Data(count: chunk.count) : Data(chunk)
+                self.deepgram.sendAudio(outChunk)
                 // Tag mic audio with 0x02 prefix for server-side recording
                 var tagged = Data([0x02])
-                tagged.append(chunk)
+                tagged.append(outChunk)
                 self.railway.sendBinary(tagged)
                 self.sent += 1
                 if self.sent == 1 || self.sent == 10 || self.sent % 100 == 0 {
-                    fputs("[Audio-Mic] \(self.sent) chunks sent\n", stderr)
+                    fputs("[Audio-Mic] \(self.sent) chunks sent\(gated ? " [gated]" : "")\n", stderr)
                 }
             }
         }
@@ -510,6 +663,11 @@ class MicCapture {
         do {
             try engine.start()
             running = true
+            // Re-align AEC state right before the first capture frame arrives.
+            // Otherwise the reverse stream (which started ~1.5s earlier for speaker
+            // warmup) has pre-buffered ~180 frames with no matching captures, and
+            // AEC3's ~300ms history window can't find a reference for each input.
+            aecQueue.sync { echoCanceller?.reset() }
             fputs("[Mic] Engine started on \(deviceName)\n", stderr)
         } catch {
             fputs("[Mic] Failed to start engine: \(error)\n", stderr)
@@ -544,7 +702,8 @@ class MicCapture {
 
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
-        accum = Data()
+        pcm48 = Data()
+        chunk16 = Data()
 
         // ── Patch B: longer settle delay (1.2s) so the OS finishes the switch
         DispatchQueue.global().asyncAfter(deadline: .now() + 1.2) { [weak self] in
@@ -601,7 +760,20 @@ func run(_ serverURL: String, _ dgKey: String, _ name: String, _ company: String
         let msg: [String: Any] = ["type": "start_call", "prospectName": name, "prospectCompany": company, "sampleRate": 16000, "source": "desktop_app"]
         if let d = try? JSONSerialization.data(withJSONObject: msg), let s = String(data: d, encoding: .utf8) { railway.sendText(s) }
     }
-    railway.onMsg = { fputs("[Railway] <- \($0.prefix(80))\n", stderr) }
+    railway.onMsg = { msg in
+        fputs("[Railway] <- \(msg.prefix(80))\n", stderr)
+        // Parse tts_state — server relays browser <audio> onplay/onended events
+        // here so we can hard-gate the mic while the AI is physically speaking
+        // through the speakers. See TTSGate.
+        guard let data = msg.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type_ = obj["type"] as? String else { return }
+        if type_ == "tts_state" {
+            let playing = (obj["playing"] as? Bool) ?? false
+            let utt = obj["utteranceId"] as? String
+            ttsGate.setActive(playing, utteranceId: utt)
+        }
+    }
 
     railway.connect()
     dgSystem.connect()

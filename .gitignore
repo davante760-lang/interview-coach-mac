@@ -3,3 +3,5 @@ dist/
 .DS_Store
 .claude/
 *.save
+third_party/
+build_native/
