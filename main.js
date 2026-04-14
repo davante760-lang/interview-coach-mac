@@ -46,6 +46,15 @@ let _preparedLaunch = null;  // { launchId, userId, role, callType, preparedAt }
 let _activeLaunchId = null;
 let _needsRestart = false;
 
+// ── OVERLAY FEATURE FLAG ─────────────────────────────────────────────────────
+// The floating overlay window is disabled until it is redesigned properly
+// (was un-movable and interrupting users on every session start). Every
+// createOverlayWindow() / overlayWindow.show() call short-circuits while
+// this flag is false. Re-enable by flipping to true once the overlay UX
+// has been rebuilt. All overlay endpoints (/overlay/test, /overlay/hide,
+// /overlay/coaching) and IPC handlers remain wired — they just no-op.
+const OVERLAY_ENABLED = false;
+
 // ── Website API Base URL ─────────────────────────────────────────────────────
 const WEBSITE_API_BASE = 'https://interviewwebsite-production.up.railway.app';
 const IC_SERVER = process.env.IC_SERVER_URL || 'https://interview-coach-production-9c63.up.railway.app';
@@ -531,6 +540,10 @@ function createWindow() {
 }
 
 function createOverlayWindow() {
+  if (!OVERLAY_ENABLED) {
+    console.log('[Overlay] Disabled — skipping window creation (see OVERLAY_ENABLED flag)');
+    return;
+  }
   const settings = loadSettings();
   const x = settings.overlayX ?? 40;
   const y = settings.overlayY ?? 40;
@@ -1160,9 +1173,9 @@ function startLocalServer() {
     // Legacy overlay endpoints (keep for now)
     if (req.method === 'POST' && req.url === '/overlay/test') {
       if (!overlayWindow) createOverlayWindow();
-      overlayWindow.show();
-      overlayWindow.webContents.send('overlay-test-mode');
-      sendJson(200, { ok: true });
+      overlayWindow?.show();
+      overlayWindow?.webContents.send('overlay-test-mode');
+      sendJson(200, { ok: true, disabled: !OVERLAY_ENABLED });
       return;
     }
 
@@ -1196,10 +1209,13 @@ function startLocalServer() {
 
 ipcMain.handle('stop-capture', async () => { stopAudioProcess(); return { ok: true }; });
 
-// Overlay IPC
+// Overlay IPC — all show paths are guarded via createOverlayWindow() early-return
+// while OVERLAY_ENABLED is false. `.show()` calls use optional chaining so they
+// no-op when the window was never created. Re-enabling the feature is a
+// single-flag flip at the top of this file.
 ipcMain.handle('overlay-show', () => {
   if (!overlayWindow) createOverlayWindow();
-  overlayWindow.show();
+  overlayWindow?.show();
 });
 ipcMain.handle('overlay-hide', () => {
   overlayWindow?.hide();
@@ -1215,13 +1231,13 @@ ipcMain.on('overlay-mouse-leave', () => {
 });
 ipcMain.handle('overlay-test', () => {
   if (!overlayWindow) createOverlayWindow();
-  overlayWindow.show();
-  overlayWindow.webContents.send('overlay-test-mode');
+  overlayWindow?.show();
+  overlayWindow?.webContents.send('overlay-test-mode');
 });
 ipcMain.handle('overlay-coaching', (event, data) => {
   if (!overlayWindow) createOverlayWindow();
-  overlayWindow.show();
-  overlayWindow.webContents.send('overlay-coaching', data);
+  overlayWindow?.show();
+  overlayWindow?.webContents.send('overlay-coaching', data);
 });
 ipcMain.handle('overlay-dismiss', () => {
   overlayWindow?.webContents.send('overlay-dismiss');
