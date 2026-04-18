@@ -299,14 +299,6 @@ class AudioDelegate: NSObject, SCStreamOutput, SCStreamDelegate {
     private let chunkBytes = 8192 // 4096 int16 samples * 2 bytes @ 16 kHz
     private var sent = 0
 
-    // ── DIAGNOSTIC STATE (latency isolation) ──
-    // Only the Send/Recv logs remain in production — they're low-frequency and
-    // give the Send↔Recv delta that diagnoses Deepgram-side latency. The per-
-    // callback SCK log was removed because 47 writes/sec could induce latency.
-    // audio_sent_duration_ms / wall_clock_elapsed_ms should stay near 1.0.
-    private var diagFirstCallbackAt: CFAbsoluteTime = 0
-    private var diagBytesSentToDg: Int64 = 0
-
     init(railway: RailwayWS, deepgram: DeepgramWS) {
         self.railway = railway
         self.deepgram = deepgram
@@ -314,10 +306,6 @@ class AudioDelegate: NSObject, SCStreamOutput, SCStreamDelegate {
 
     func stream(_ stream: SCStream, didOutputSampleBuffer buf: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .audio, buf.isValid, CMSampleBufferGetNumSamples(buf) > 0 else { return }
-        // State stamp for DIAG-Sys-Send (used below). No per-callback logging in
-        // production — would fire ~47 writes/sec and can induce the CPU/IO latency
-        // it was added to diagnose. Re-enable behind a debug flag if needed.
-        if diagFirstCallbackAt == 0 { diagFirstCallbackAt = CFAbsoluteTimeGetCurrent() }
         processAudio(buf)
     }
 
@@ -407,15 +395,6 @@ class AudioDelegate: NSObject, SCStreamOutput, SCStreamDelegate {
         while chunk16.count >= chunkBytes {
             let chunk = chunk16.prefix(chunkBytes)
             chunk16.removeFirst(chunkBytes)
-            // ── DIAG: dgSystem WS send timestamp + cumulative audio sent ──
-            // If SCK ratio reads near 1.0 but dg_recv finals arrive seconds later
-            // than ws_send, the delay is Deepgram-side or network. If ws_send lags
-            // far behind SCK callback time for the same chunk, delay is in this
-            // Swift pipeline (AEC/queue/chunking).
-            diagBytesSentToDg += Int64(chunk.count)
-            let dgAudioSec = Double(diagBytesSentToDg) / 32000.0 // 16kHz × 2 bytes/sample
-            let wallSec = diagFirstCallbackAt > 0 ? (CFAbsoluteTimeGetCurrent() - diagFirstCallbackAt) : 0
-            fputs("[DIAG-Sys-Send] t=\(String(format: "%.2f", wallSec)) bytes=\(chunk.count) cumAudioSec=\(String(format: "%.2f", dgAudioSec))\n", stderr)
             deepgram.sendAudio(Data(chunk))
             // Tag system audio with 0x01 prefix for server-side recording
             var tagged = Data([0x01])
@@ -764,21 +743,15 @@ func run(_ serverURL: String, _ dgKey: String, _ name: String, _ company: String
     let dgMic = DeepgramWS(apiKey: dgKey, sampleRate: 16000, label: "Mic")
 
     // System audio transcripts → desktop_transcript (interviewer)
-    // Send BOTH interims and finals. Interims arrive ~500ms after speech; `is_final=true`
-    // events can be 6-10s late when continuous low-level audio suppresses Deepgram's VAD.
-    // The server fires on interims ending with "?" and dedups via fingerprint when the
-    // eventual final arrives with the same text.
     dgSystem.onTranscript = { text, isFinal in
-        // ── DIAG: dgSystem onTranscript receive timestamp ──
-        // Compare against [DIAG-Sys-Send] cumAudioSec to isolate Deepgram-side latency.
-        // If ws_send is real-time (cumAudioSec ≈ wallSec) but onTranscript wall-clock lags
-        // behind ws_send by seconds, the delay is post-send (Deepgram VAD or network).
-        let tRecv = CFAbsoluteTimeGetCurrent()
-        fputs("[DIAG-Sys-Recv] t=\(String(format: "%.3f", tRecv)) isFinal=\(isFinal) text=\"\(text.prefix(40))\"\n", stderr)
-        fputs(isFinal ? "[Transcript] \(text)\n" : "[Interim-Sys] \(text)\n", stderr)
-        let msg: [String: Any] = ["type": "desktop_transcript", "text": text, "isFinal": isFinal, "speaker": "Interviewer"]
-        if let d = try? JSONSerialization.data(withJSONObject: msg), let s = String(data: d, encoding: .utf8) {
-            railway.sendText(s)
+        if isFinal {
+            fputs("[Transcript] \(text)\n", stderr)
+            let msg: [String: Any] = ["type": "desktop_transcript", "text": text, "isFinal": true, "speaker": "Interviewer"]
+            if let d = try? JSONSerialization.data(withJSONObject: msg), let s = String(data: d, encoding: .utf8) {
+                railway.sendText(s)
+            }
+        } else {
+            fputs("[Interim] \(text)\n", stderr)
         }
     }
 
