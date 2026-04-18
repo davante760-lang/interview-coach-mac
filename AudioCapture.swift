@@ -832,7 +832,7 @@ func run(_ serverURL: String, _ dgKey: String, _ name: String, _ company: String
 
 if #available(macOS 13.0, *) {
     let a = CommandLine.arguments
-    let serverURL = a.count > 1 ? a[1] : "wss://interview-coach-production-9c63.up.railway.app"
+    let serverURL = a.count > 1 ? a[1] : "wss://app.noruma.ai"
     let dgKey     = a.count > 2 ? a[2] : "54d546fe79b59f0f372e78e6cc3e77673649b611"
     let name      = a.count > 3 ? a[3] : ""
     let company   = a.count > 4 ? a[4] : ""

@@ -56,8 +56,8 @@ let _needsRestart = false;
 const OVERLAY_ENABLED = false;
 
 // ── Website API Base URL ─────────────────────────────────────────────────────
-const WEBSITE_API_BASE = 'https://interviewwebsite-production.up.railway.app';
-const IC_SERVER = process.env.IC_SERVER_URL || 'https://interview-coach-production-9c63.up.railway.app';
+const WEBSITE_API_BASE = 'https://noruma.ai';
+const IC_SERVER = process.env.IC_SERVER_URL || 'https://app.noruma.ai';
 
 // ── Dev: --reset flag clears all auth data for clean testing ─────────────────
 if (process.argv.includes('--reset')) {
@@ -544,7 +544,7 @@ function updateTrayMenu(isRecording = false) {
     { label: status, enabled: false },
     { type: 'separator' },
     { label: 'Open in Browser', click: () => {
-      require('electron').shell.openExternal('https://interview-coach-production-9c63.up.railway.app');
+      require('electron').shell.openExternal('https://app.noruma.ai');
     }},
     { label: 'Check for Updates', click: () => autoUpdater.checkForUpdates() }
   ];
@@ -844,7 +844,7 @@ app.on('before-quit', () => { app.isQuitting = true; stopAudioProcess(); });
 
 // ── Shared capture logic (used by IPC + local HTTP server) ──────────────────
 
-const _BASE_SERVER_URL = 'wss://interview-coach-production-9c63.up.railway.app';
+const _BASE_SERVER_URL = 'wss://app.noruma.ai';
 const DG_KEY     = '54d546fe79b59f0f372e78e6cc3e77673649b611';
 
 // Auth credentials — stored in settings.json, auto-provisioned by web app
@@ -1016,7 +1016,7 @@ ipcMain.handle('start-capture', async (event, { prospectName, prospectCompany })
 
 function startLocalServer() {
   const ALLOWED_ORIGINS = [
-    'https://interview-coach-production-9c63.up.railway.app',
+    'https://app.noruma.ai',
     'http://localhost:3000',
     'http://localhost:4173',
     'http://localhost:5173'
