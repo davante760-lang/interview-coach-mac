@@ -6,79 +6,121 @@ import CoreAudio
 // MARK: - Railway WebSocket
 
 class RailwayWS {
+    // Serial queue guards ALL access to `task`, `connected`, `reconnectAttempts`,
+    // `intentionallyClosed`, and `reconnecting`. Prior code mutated these from
+    // multiple dispatch queues (URLSession completion queues, global asyncAfter
+    // timers, reconnect paths). Two disconnect signals firing near-simultaneously
+    // (send-error + recv-error) raced on `task` assignment → ARC retain/release
+    // torn read → objc_msgSend on freed NSURLSessionWebSocketTask → SIGSEGV.
+    // Observed in production: EXC_BAD_ACCESS in RailwayWS.connect()+816 after
+    // ~3-10min of session time (Railway idle disconnect → dual failure paths).
+    private let wsQueue = DispatchQueue(label: "com.noruma.railwayws", qos: .userInitiated)
     private var task: URLSessionWebSocketTask?
     private let url: URL
-    var connected = false
+    private var _connected = false
+    var connected: Bool { wsQueue.sync { _connected } }
     var onOpen: (() -> Void)?
     var onMsg: ((String) -> Void)?
     private var intentionallyClosed = false
     private var reconnectAttempts = 0
+    private var reconnecting = false  // debounce: multiple concurrent disconnect
+                                       // signals coalesce into a single reconnect.
 
     init(_ url: URL) { self.url = url }
 
     func connect() {
+        wsQueue.async { [weak self] in self?._connectOnQueue() }
+    }
+
+    private func _connectOnQueue() {
+        // Runs on wsQueue only. Safe to read/write state directly.
         intentionallyClosed = false
         task?.cancel(with: .normalClosure, reason: nil)
-        task = URLSession.shared.webSocketTask(with: url)
-        task?.resume()
-        recv()
-        DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            guard let self = self, self.task?.state == .running else { return }
-            self.connected = true
-            self.reconnectAttempts = 0
-            fputs("[Railway] Connected\n", stderr)
-            self.onOpen?()
+        let newTask = URLSession.shared.webSocketTask(with: url)
+        task = newTask
+        newTask.resume()
+        _recvOnQueue()
+        wsQueue.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self = self else { return }
+            if self.task === newTask, newTask.state == .running {
+                self._connected = true
+                self.reconnectAttempts = 0
+                self.reconnecting = false
+                fputs("[Railway] Connected\n", stderr)
+                self.onOpen?()
+            }
         }
     }
 
     func sendText(_ s: String) {
-        guard connected else { return }
-        task?.send(.string(s)) { [weak self] err in
-            if let err = err {
-                fputs("[Railway] send error: \(err)\n", stderr)
-                self?.handleDisconnect()
+        wsQueue.async { [weak self] in
+            guard let self = self, self._connected, let task = self.task else { return }
+            task.send(.string(s)) { [weak self] err in
+                if let err = err {
+                    fputs("[Railway] send error: \(err)\n", stderr)
+                    self?._scheduleReconnect()
+                }
             }
         }
     }
 
     func sendBinary(_ data: Data) {
-        guard connected else { return }
-        task?.send(.data(data)) { [weak self] err in
-            if let err = err {
-                fputs("[Railway] binary send error: \(err)\n", stderr)
-                self?.handleDisconnect()
+        wsQueue.async { [weak self] in
+            guard let self = self, self._connected, let task = self.task else { return }
+            task.send(.data(data)) { [weak self] err in
+                if let err = err {
+                    fputs("[Railway] binary send error: \(err)\n", stderr)
+                    self?._scheduleReconnect()
+                }
             }
         }
     }
 
     func close() {
-        intentionallyClosed = true
-        connected = false
-        task?.cancel(with: .normalClosure, reason: nil)
+        wsQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.intentionallyClosed = true
+            self._connected = false
+            self.task?.cancel(with: .normalClosure, reason: nil)
+            self.task = nil
+        }
     }
 
-    private func handleDisconnect() {
+    private func _scheduleReconnect() {
+        wsQueue.async { [weak self] in self?._handleDisconnectOnQueue() }
+    }
+
+    private func _handleDisconnectOnQueue() {
         guard !intentionallyClosed else { return }
-        connected = false
+        // Debounce: multiple send/recv failures during the same outage produce
+        // multiple _scheduleReconnect calls. Only arm one reconnect at a time —
+        // prevents the dual-connect() race that caused the segfault.
+        if reconnecting { return }
+        reconnecting = true
+        _connected = false
         reconnectAttempts += 1
         let delay = Double(min(15, 1 << min(reconnectAttempts, 4)))
         fputs("[Railway] Reconnecting in \(Int(delay))s (attempt \(reconnectAttempts))\n", stderr)
-        DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [weak self] in
-            self?.connect()
+        wsQueue.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?._connectOnQueue()
         }
     }
 
     private func sendPong() {
-        task?.sendPing { [weak self] err in
-            if let err = err {
-                fputs("[Railway] pong error: \(err)\n", stderr)
-                self?.handleDisconnect()
+        wsQueue.async { [weak self] in
+            guard let self = self, let task = self.task else { return }
+            task.sendPing { [weak self] err in
+                if let err = err {
+                    fputs("[Railway] pong error: \(err)\n", stderr)
+                    self?._scheduleReconnect()
+                }
             }
         }
     }
 
-    private func recv() {
-        task?.receive { [weak self] r in
+    private func _recvOnQueue() {
+        guard let task = task else { return }
+        task.receive { [weak self] r in
             switch r {
             case .success(let m):
                 switch m {
@@ -90,10 +132,11 @@ class RailwayWS {
                 @unknown default:
                     break
                 }
-                self?.recv()
+                // Re-arm receive on the serial queue so task access stays ordered
+                self?.wsQueue.async { self?._recvOnQueue() }
             case .failure:
                 fputs("[Railway] WS closed\n", stderr)
-                self?.handleDisconnect()
+                self?._scheduleReconnect()
             }
         }
     }
