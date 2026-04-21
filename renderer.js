@@ -467,6 +467,9 @@ function addTranscript(text, isFinal, speaker) {
   const prefix = isCandidate ? 'You: ' : '';
   const cls = isCandidate ? 'transcript-line candidate' : 'transcript-line';
 
+  // Reverse-chronological: newest at top, older entries scroll down off-screen.
+  // Each new line is prepended to the container; interim elements (per speaker)
+  // also live at the top and get replaced in place as Deepgram refines them.
   if (isFinal) {
     // Remove the matching interim element
     if (isCandidate) {
@@ -477,29 +480,34 @@ function addTranscript(text, isFinal, speaker) {
     const el = document.createElement('div');
     el.className = cls;
     el.textContent = prefix + text;
-    container.appendChild(el);
+    container.insertBefore(el, container.firstChild);
   } else {
-    // Update or create interim element per speaker
+    // Update or create interim element per speaker. Interim elements stay at
+    // top (firstChild) and get their text updated as new partials arrive.
     if (isCandidate) {
       if (!interimElMic) {
         interimElMic = document.createElement('div');
         interimElMic.className = cls + ' interim';
-        container.appendChild(interimElMic);
+        container.insertBefore(interimElMic, container.firstChild);
+      } else if (interimElMic !== container.firstChild) {
+        container.insertBefore(interimElMic, container.firstChild);
       }
       interimElMic.textContent = prefix + text;
     } else {
       if (!interimElSystem) {
         interimElSystem = document.createElement('div');
         interimElSystem.className = cls + ' interim';
-        container.appendChild(interimElSystem);
+        container.insertBefore(interimElSystem, container.firstChild);
+      } else if (interimElSystem !== container.firstChild) {
+        container.insertBefore(interimElSystem, container.firstChild);
       }
       interimElSystem.textContent = prefix + text;
     }
   }
 
-  // Auto-scroll to bottom
+  // Auto-scroll to TOP so newest content is always visible.
   const panel = document.getElementById('transcripts');
-  panel.scrollTop = panel.scrollHeight;
+  panel.scrollTop = 0;
 }
 
 // ── UI ────────────────────────────────────────────────────────────────────────
