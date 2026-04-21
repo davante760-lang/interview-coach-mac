@@ -45,6 +45,7 @@ body {
   -webkit-app-region: drag;
   user-select: none;
   height: 100vh;
+  overflow: hidden;                /* Body never scrolls — only .transcripts does. */
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -175,13 +176,15 @@ input.field::placeholder { color: var(--t4); }
 }
 
 .transcripts {
-  flex: 1;
-  min-height: 80px;
+  flex: 1 1 0;                     /* `1 1 0` + `min-height:0` = can actually shrink
+                                      below content so overflow-y kicks in properly */
+  min-height: 0;
   background: var(--bg-card);
   border: 1px solid var(--border-light);
   border-radius: var(--radius);
   padding: 12px 14px;
-  overflow-y: auto;
+  overflow-y: auto;                /* newest transcript at top, older scrolls down inside the panel */
+  overscroll-behavior: contain;    /* don't let wheel events bubble up to the window */
   font-size: 12px;
   line-height: 1.6;
   -webkit-app-region: no-drag;
@@ -302,7 +305,7 @@ input.field::placeholder { color: var(--t4); }
 /* ── First-Launch Screens ─────────────────────────────────────────────────── */
 
 .view { display: none; }
-.view.active { display: flex; flex-direction: column; flex: 1; gap: 18px; }
+.view.active { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 18px; }
 
 /* Loading screen */
 .loading-screen {
