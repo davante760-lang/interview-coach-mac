@@ -936,13 +936,61 @@ function showMainWindowForCapture() {
   }
 }
 
-function startAudioCapture(prospectName, prospectCompany) {
+async function startAudioCapture(prospectName, prospectCompany) {
   // Always pop the troubleshooting window — live transcripts + WS status give
   // the user instant feedback on whether capture is healthy before they start
   // speaking. Idempotent on re-entry.
   showMainWindowForCapture();
 
-  if (audioProcess) return Promise.resolve({ ok: true, already: true });
+  if (audioProcess) return { ok: true, already: true };
+
+  // ── PERMISSION PREFLIGHT ───────────────────────────────────────────────
+  // Check both mic + screen recording permissions BEFORE spawning the Swift
+  // binary. macOS sandboxd will SIGKILL the binary if Screen Recording isn't
+  // granted, leaving the user with a useless "Process exited: null" error
+  // and no path forward. Fail fast with a clear message + open System
+  // Settings to the right pane so they can grant and retry.
+  if (process.platform === 'darwin') {
+    const { shell } = require('electron');
+
+    let micStatus = systemPreferences.getMediaAccessStatus('microphone');
+    if (micStatus !== 'granted') {
+      // Mic CAN be requested programmatically — try it first.
+      try {
+        const granted = await systemPreferences.askForMediaAccess('microphone');
+        micStatus = granted ? 'granted' : systemPreferences.getMediaAccessStatus('microphone');
+      } catch (_) {
+        micStatus = systemPreferences.getMediaAccessStatus('microphone');
+      }
+    }
+
+    const screenStatus = systemPreferences.getMediaAccessStatus('screen');
+
+    // Screen Recording CANNOT be requested programmatically — only granted
+    // manually via System Settings. If denied or undetermined, open the
+    // exact pane and surface the error.
+    if (screenStatus !== 'granted' || micStatus !== 'granted') {
+      const missing = [];
+      if (screenStatus !== 'granted') missing.push('Screen Recording');
+      if (micStatus !== 'granted') missing.push('Microphone');
+
+      // Open System Settings to the most blocking pane (Screen first if
+      // missing — that's the one the user can't fix without manual action).
+      const url = (screenStatus !== 'granted')
+        ? 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
+        : 'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone';
+      try { shell.openExternal(url); } catch (_) {}
+
+      return {
+        error: `${missing.join(' + ')} permission required. ` +
+               `System Settings has been opened — enable Noruma in the list, then quit and reopen the app.`,
+        permissionsMissing: missing,
+        micStatus,
+        screenStatus,
+      };
+    }
+  }
+
   console.log('[Main] Spawning:', BINARY_PATH);
 
   // Ensure binary is executable (may lose permissions after install/xattr)
@@ -1000,7 +1048,30 @@ function startAudioCapture(prospectName, prospectCompany) {
         finish({ error: 'Screen Recording permission denied. Enable it in System Settings.' });
       }
     });
-    audioProcess?.on('exit', (code) => finish({ error: 'Process exited: ' + code }));
+    audioProcess?.on('exit', (code, signal) => {
+      // code=null + signal set → killed by OS (most often sandboxd / TCC
+      // because Screen Recording or Mic permission is missing or revoked).
+      // code=0 → clean exit. code=non-zero → app-level failure with details
+      // hopefully already in stderr (handled above).
+      if (code === null && signal) {
+        // Re-open System Settings — the user almost certainly needs to grant
+        // Screen Recording. Also: the binary is now in macOS's TCC list
+        // (because it was launched once), so it will appear there.
+        try {
+          const { shell } = require('electron');
+          shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+        } catch (_) {}
+        finish({
+          error: `Audio capture was killed by macOS (signal ${signal}). ` +
+                 `This usually means Screen Recording permission is missing. ` +
+                 `System Settings has been opened — enable Noruma under ` +
+                 `Privacy & Security → Screen Recording, then quit and reopen the app.`,
+          permissionsMissing: ['Screen Recording'],
+        });
+      } else {
+        finish({ error: 'Process exited unexpectedly (code=' + code + ', signal=' + signal + ')' });
+      }
+    });
     audioProcess?.on('error', (err) => finish({ error: err.message }));
     setTimeout(() => finish({ ok: true }), 15000);
   });

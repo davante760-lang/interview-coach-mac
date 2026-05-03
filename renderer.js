@@ -371,7 +371,19 @@ ipcRenderer.on('audio-stopped', (event, { code, signal }) => {
   if (isCapturing) {
     isCapturing = false;
     stopTimer();
-    updateUI('error', 'Audio process stopped unexpectedly (code ' + code + ')');
+    // code=null + signal → killed by macOS (most often a TCC permission
+    // revocation mid-session). Surface the actual cause + the fix path
+    // instead of the cryptic "code null".
+    if (code === null && signal) {
+      updateUI('error',
+        'Audio capture stopped because macOS killed the process (signal ' + signal + '). ' +
+        'This is usually Screen Recording permission being revoked or denied. ' +
+        'Open System Settings → Privacy & Security → Screen Recording, ' +
+        'enable Noruma, then quit and reopen the app.'
+      );
+    } else {
+      updateUI('error', 'Audio process stopped unexpectedly (code=' + code + ', signal=' + signal + ')');
+    }
   }
 });
 
