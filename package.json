@@ -1,6 +1,6 @@
 {
   "name": "interview-coach-desktop",
-  "version": "2.5.17",
+  "version": "2.5.18",
   "description": "Captures system audio via ScreenCaptureKit and streams to Interview Coach",
   "main": "main.js",
   "scripts": {
@@ -13,7 +13,7 @@
     "preview:practice:ent": "electron . --preview first-practice enterprise_ae",
     "preview:practice:mgr": "electron . --preview first-practice sales_manager_director",
     "preview:waiting": "electron . --preview waiting",
-    "build-swift": "cd audio-capture && bash build.sh",
+    "build-swift": "cd audio-capture && bash build.sh && cd .. && bash audio-capture/relocate_dylibs.sh",
     "build": "electron-builder --mac",
     "release": "electron-builder --mac --publish always"
   },
