@@ -9,9 +9,29 @@ exports.default = async function notarizing(context) {
   const appName = context.packager.appInfo.productFilename;
   const appPath = path.join(appOutDir, `${appName}.app`);
 
-  if (!process.env.APPLE_ID || !process.env.APPLE_APP_SPECIFIC_PASSWORD || !process.env.APPLE_TEAM_ID) {
-    console.warn('[notarize] Skipping — APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID not set');
-    return;
+  // FAIL HARD if Apple credentials are missing. Previously this silently
+  // skipped notarization, which meant a forgotten `source ~/.zshrc` (or
+  // running from CI/IDE without env inherited) would happily publish a
+  // completely unsigned, unnotarized, unstapled artifact — customers would
+  // hit the "Apple could not verify" Gatekeeper warning on first launch.
+  // Better to fail the build loudly than ship a bad release.
+  //
+  // Override for legitimate dev/preview builds: SKIP_NOTARIZE=1 npm run build
+  const missing = [];
+  if (!process.env.APPLE_ID) missing.push('APPLE_ID');
+  if (!process.env.APPLE_APP_SPECIFIC_PASSWORD) missing.push('APPLE_APP_SPECIFIC_PASSWORD');
+  if (!process.env.APPLE_TEAM_ID) missing.push('APPLE_TEAM_ID');
+  if (missing.length) {
+    if (process.env.SKIP_NOTARIZE === '1') {
+      console.warn(`[notarize] SKIP_NOTARIZE=1 set — bypassing notarization. Missing: ${missing.join(', ')}`);
+      console.warn('[notarize] DO NOT publish this build. It will trigger Gatekeeper warnings for end users.');
+      return;
+    }
+    throw new Error(
+      `[notarize] BUILD ABORTED — missing Apple credentials: ${missing.join(', ')}. ` +
+      `Source your shell rc (source ~/.zshrc) to load them, or set SKIP_NOTARIZE=1 ` +
+      `for a local-only dev build that you will NOT publish.`
+    );
   }
 
   console.log(`[notarize] Submitting ${appPath} to Apple — this can take several minutes...`);
@@ -43,5 +63,18 @@ exports.default = async function notarizing(context) {
   } catch (err) {
     console.error('[notarize] Stapling failed:', err.message);
     throw err; // fail the build — unstapled artifact would just repeat this exact user-facing problem
+  }
+
+  // ── FINAL ASSERTION: simulate what macOS Gatekeeper does on the user's
+  // machine. spctl --assess runs the same checks (signature + notarization
+  // + staple) that block first launch when missing. If this passes here,
+  // the user's first launch will pass too.
+  try {
+    console.log(`[notarize] Final Gatekeeper check (spctl)...`);
+    execSync(`spctl --assess --verbose=4 --type execute "${appPath}"`, { stdio: 'inherit' });
+    console.log('[notarize] ✓ Gatekeeper-ready. Build will not trigger "Apple could not verify" warnings.');
+  } catch (err) {
+    console.error('[notarize] Gatekeeper check FAILED — this build would trigger the "Apple could not verify" warning for end users.');
+    throw err;
   }
 };
