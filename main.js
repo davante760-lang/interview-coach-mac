@@ -1213,12 +1213,26 @@ function startLocalServer() {
 
         _activeLaunchId = data.launchId;
 
-        // Start audio capture
+        // Start audio capture. startAudioCapture may RETURN an error
+        // object (e.g. permission preflight failure) instead of throwing,
+        // so we have to inspect the return value AND catch throws —
+        // missing either path leaves the browser thinking capture started
+        // when it didn't (no audio process, no transcripts, silent fail).
+        let captureResult;
         try {
-          await startAudioCapture(data.prospectName || 'Practice Interview', data.prospectCompany || '');
+          captureResult = await startAudioCapture(data.prospectName || 'Practice Interview', data.prospectCompany || '');
         } catch (e) {
           _activeLaunchId = null;
           return sendJson(500, { error: 'capture_failed', message: e.message });
+        }
+        if (captureResult && captureResult.error) {
+          _activeLaunchId = null;
+          console.error('[/commit-start] capture blocked:', captureResult.error);
+          return sendJson(503, {
+            error: 'capture_blocked',
+            message: captureResult.error,
+            permissionsMissing: captureResult.permissionsMissing || [],
+          });
         }
 
         // Show overlay
@@ -1262,7 +1276,15 @@ function startLocalServer() {
         }
 
         try {
-          await startAudioCapture(data.prospectName || '', data.prospectCompany || '');
+          const captureResult = await startAudioCapture(data.prospectName || '', data.prospectCompany || '');
+          if (captureResult && captureResult.error) {
+            console.error('[/start] capture blocked:', captureResult.error);
+            return sendJson(503, {
+              error: 'capture_blocked',
+              message: captureResult.error,
+              permissionsMissing: captureResult.permissionsMissing || [],
+            });
+          }
           console.log('[/start] Legacy start succeeded');
           sendJson(200, { status: 'started' });
         } catch (e) {
