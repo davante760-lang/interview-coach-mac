@@ -976,9 +976,13 @@ async function startAudioCapture(prospectName, prospectCompany) {
 
       // Open System Settings to the most blocking pane (Screen first if
       // missing — that's the one the user can't fix without manual action).
+      // macOS 13+ (Ventura/Sonoma/Sequoia) uses the new System Settings app
+      // with reorganized URLs. com.apple.preference.security?Privacy_X opens
+      // to General instead of the right pane on Sequoia. The
+      // PrivacySecurity.extension URL is what works on 13+.
       const url = (screenStatus !== 'granted')
-        ? 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
-        : 'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone';
+        ? 'x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture'
+        : 'x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Microphone';
       try { shell.openExternal(url); } catch (_) {}
 
       return {
@@ -1059,7 +1063,7 @@ async function startAudioCapture(prospectName, prospectCompany) {
         // (because it was launched once), so it will appear there.
         try {
           const { shell } = require('electron');
-          shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+          shell.openExternal('x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture');
         } catch (_) {}
         finish({
           error: `Audio capture was killed by macOS (signal ${signal}). ` +
