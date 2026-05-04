@@ -25,42 +25,24 @@ mkdir -p "$DEST"
 
 echo "==> Copying dylibs into $DEST"
 cp -p "$AEC_PREFIX/lib/libwebrtc-audio-processing-2.1.dylib" "$DEST/"
-cp -p "$BREW_LIB/libabsl_base.2601.0.0.dylib" "$DEST/"
-cp -p "$BREW_LIB/libabsl_raw_logging_internal.2601.0.0.dylib" "$DEST/"
-cp -p "$BREW_LIB/libabsl_log_severity.2601.0.0.dylib" "$DEST/"
-cp -p "$BREW_LIB/libabsl_spinlock_wait.2601.0.0.dylib" "$DEST/"
 
-# webrtc-audio-processing pulls in more absl symbols at load time; copy all
-# absl dylibs that come up as dependencies.
-echo "==> Scanning for transitive absl deps"
-scan() {
-  otool -L "$1" | awk 'NR>1 {print $1}' | grep -E "libabsl_" | grep -v "^@" || true
-}
-
-added=1
-while [ $added -gt 0 ]; do
-  added=0
-  for f in "$DEST"/*.dylib; do
-    deps=$(scan "$f")
-    for d in $deps; do
-      name=$(basename "$d")
-      if [ ! -f "$DEST/$name" ]; then
-        # d is the path recorded in install_names; resolve via brew
-        src=""
-        if [ -f "$BREW_LIB/$name" ]; then
-          src="$BREW_LIB/$name"
-        elif [ -f "$d" ]; then
-          src="$d"
-        fi
-        if [ -n "$src" ]; then
-          cp -p "$src" "$DEST/"
-          echo "   + $name"
-          added=$((added+1))
-        fi
-      fi
-    done
-  done
+# Bundle ALL versioned libabsl_*.dylib upfront. The previous "transitive
+# scan" approach was fragile — it filtered out @rpath/@loader_path-prefixed
+# install names, so Homebrew dylibs that referenced their siblings via
+# @rpath would not be detected as dependencies. Result: the bundle would
+# ship missing dylibs (e.g. libabsl_strings_internal in v2.5.20), AudioCapture
+# would dyld-fail at launch with SIGABRT on the user's machine.
+#
+# Brute-force fix: copy every versioned absl dylib. ~93 files, ~8MB extra
+# bundle size, zero chance of missing a transitive dep ever again.
+echo "==> Bundling all versioned libabsl_*.dylib (was missing transitive deps before)"
+copied=0
+for src in "$BREW_LIB"/libabsl_*.[0-9]*.[0-9]*.[0-9]*.dylib; do
+  [ -f "$src" ] || continue
+  cp -p "$src" "$DEST/"
+  copied=$((copied+1))
 done
+echo "   copied $copied absl dylibs"
 
 # Homebrew ships its dylibs as 444 (read-only). `cp -p` preserves that mode,
 # and Squirrel.Mac (electron-updater) then fails to strip `com.apple.quarantine`
